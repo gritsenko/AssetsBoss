@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AssetsBoss.Core.Tests/AssetsBoss.Core.Tests.csproj" />
+    <Project Path="src/AssetsBoss.Core/AssetsBoss.Core.csproj" />
+    <Project Path="src/AssetsBoss.Desktop/AssetsBoss.Desktop.csproj" />
+    <Project Path="src/AssetsBoss.Server/AssetsBoss.Server.csproj" />
+  </Folder>
+</Solution>

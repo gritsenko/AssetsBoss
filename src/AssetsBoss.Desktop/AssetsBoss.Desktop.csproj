@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe: без консольного окна -->
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>AssetsBoss</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AssetsBoss.Server\AssetsBoss.Server.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <FrontendDir>$(MSBuildProjectDirectory)\..\..\frontend</FrontendDir>
+  </PropertyGroup>
+
+  <!-- При publish: собрать фронтенд и положить dist как wwwroot рядом с exe.
+       npm ci только при отсутствии node_modules: clean-install сносит каталог
+       и падает с EPERM, если запущен Vite dev-сервер. -->
+  <Target Name="BuildFrontend" BeforeTargets="ComputeFilesToPublish">
+    <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)"
+          Condition="!Exists('$(FrontendDir)\node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" />
+    <ItemGroup>
+      <FrontendDist Include="$(FrontendDir)\dist\**" />
+      <ResolvedFileToPublish Include="@(FrontendDist)"
+          RelativePath="wwwroot\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
+</Project>
