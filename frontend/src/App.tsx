@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Cube,
   FilmStrip,
@@ -12,7 +12,7 @@ import {
 } from '@phosphor-icons/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api/client'
-import type { Asset, AssetQueryParams } from './api/types'
+import type { AnimGroupDetail, Asset, AssetQueryParams, GroupRef } from './api/types'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
 import { DetailPanel } from './components/DetailPanel'
 import { FilterChips } from './components/FilterChips'
@@ -31,8 +31,13 @@ import { useDebounce } from './hooks/useDebounce'
 import { useKindCounts } from './hooks/useKindCounts'
 import { usePersistedState } from './hooks/usePersistedState'
 import { useScanStatus } from './hooks/useScanStatus'
+import { assetEntry, buildEntries, type Entry, isAnimEntry } from './lib/anim'
 import { type DisplayKind, KIND_META } from './lib/kind'
 import { themeVars, useTheme } from './theme'
+
+/** Ниже этого размера миниатюр сетка переходит в компактный режим без подписей. */
+const COMPACT_THRESHOLD = 120
+const COMPACT_SIZE = 88
 
 export default function App() {
   const showToast = useToast()
@@ -44,6 +49,21 @@ export default function App() {
   const [thumbMin, setThumbMin] = usePersistedState('assetboss-thumb', 216)
   const [showExt, setShowExt] = usePersistedState('assetboss-showext', true)
   const [panelOpen, setPanelOpen] = usePersistedState('assetboss-panel', true)
+  const [groupAnims, setGroupAnims] = usePersistedState('assetboss-groupanims', true)
+
+  // компактная сетка: ниже порога подписи скрываются; тоггл в тулбаре прыгает
+  // между компактным размером и последним «обычным»
+  const compact = thumbMin < COMPACT_THRESHOLD
+  const lastRegularThumb = useRef(216)
+  const toggleCompact = useCallback(() => {
+    setThumbMin((prev) => {
+      if (prev < COMPACT_THRESHOLD) {
+        return lastRegularThumb.current >= COMPACT_THRESHOLD ? lastRegularThumb.current : 216
+      }
+      lastRegularThumb.current = prev
+      return COMPACT_SIZE
+    })
+  }, [setThumbMin])
 
   // фильтры / навигация
   const [activeSourceId, setActiveSourceId] = useState<number | undefined>(undefined)
@@ -52,13 +72,17 @@ export default function App() {
   const [query, setQuery] = useState('')
   const debouncedSearch = useDebounce(query.trim(), 250)
 
-  // выделение / детали / оверлеи
-  const [selected, setSelected] = useState<Set<number>>(() => new Set())
-  const [anchorId, setAnchorId] = useState<number | null>(null) // якорь для shift-выделения
-  const [primaryId, setPrimaryId] = useState<number | null>(null) // активный ассет в панели деталей
-  const [lightboxId, setLightboxId] = useState<number | null>(null) // полноэкранный просмотр
+  // выделение / детали / оверлеи — ключи строк выдачи (Entry.key)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [anchorKey, setAnchorKey] = useState<string | null>(null) // якорь для shift-выделения
+  const [primaryKey, setPrimaryKey] = useState<string | null>(null) // активная строка в панели деталей
+  const [lightbox, setLightbox] = useState<Entry | null>(null) // полноэкранный просмотр
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // раскрытые группы анимаций (ключ → адрес группы) и клипы
+  const [expandedGroups, setExpandedGroups] = useState<Map<string, GroupRef>>(() => new Map())
+  const [expandedClips, setExpandedClips] = useState<Set<string>>(() => new Set())
 
   const columnsRef = useRef(1)
 
@@ -76,8 +100,9 @@ export default function App() {
       recursive: true,
       kind: serverKind ?? undefined,
       q: debouncedSearch || undefined,
+      grouped: groupAnims,
     }),
-    [activeSourceId, dir, serverKind, debouncedSearch],
+    [activeSourceId, dir, serverKind, debouncedSearch, groupAnims],
   )
 
   const assetsQuery = useAssets(params)
@@ -89,66 +114,114 @@ export default function App() {
   const serverTotal = assetsQuery.data?.pages[0]?.total ?? 0
   const total = clientFilter ? items.length : serverTotal
 
+  // детали раскрытых групп (кэшируются react-query, общие с панелью/лайтбоксом)
+  const groupRefs = useMemo(() => [...expandedGroups.entries()], [expandedGroups])
+  const groupDetails = useQueries({
+    queries: groupRefs.map(([, ref]) => ({
+      queryKey: ['animGroup', ref.sourceId, ref.dir, ref.name],
+      queryFn: () => api.getAnimGroup(ref),
+      staleTime: 5 * 60_000,
+    })),
+    combine: (results) => {
+      const m = new Map<string, AnimGroupDetail | undefined>()
+      groupRefs.forEach(([key], i) => m.set(key, results[i]?.data))
+      return m
+    },
+  })
+
+  const entries = useMemo(
+    () => buildEntries(items, groupDetails, expandedClips),
+    [items, groupDetails, expandedClips],
+  )
+  // раскрытия добавляют строки поверх серверного total (дети есть только у загруженных страниц)
+  const displayTotal = total + entries.length - items.length
+
   // ---------- выделение ----------
   const clearSelection = useCallback(() => {
     setSelected(new Set())
-    setPrimaryId(null)
-    setAnchorId(null)
+    setPrimaryKey(null)
+    setAnchorKey(null)
   }, [])
 
-  /** Одиночное выделение + установка активного ассета (показываем его в панели). */
-  const selectOnly = useCallback((id: number) => {
-    setSelected(new Set([id]))
-    setAnchorId(id)
-    setPrimaryId(id)
+  /** Одиночное выделение + установка активной строки (показываем её в панели). */
+  const selectOnly = useCallback((key: string) => {
+    setSelected(new Set([key]))
+    setAnchorKey(key)
+    setPrimaryKey(key)
   }, [])
 
-  /** Клик по ассету: plain — один, Ctrl/Cmd — переключить, Shift — диапазон от якоря. */
+  /** Клик по строке: plain — одна, Ctrl/Cmd — переключить, Shift — диапазон от якоря. */
   const handleSelect = useCallback(
-    (asset: Asset, e: React.MouseEvent) => {
+    (entry: Entry, e: React.MouseEvent) => {
       e.stopPropagation() // не даём клику всплыть до фона (он сбрасывает выделение)
-      const id = asset.id
-      if (e.shiftKey && anchorId !== null) {
-        const ids = items.map((a) => a.id)
-        const a = ids.indexOf(anchorId)
-        const b = ids.indexOf(id)
+      const key = entry.key
+      if (e.shiftKey && anchorKey !== null) {
+        const keys = entries.map((x) => x.key)
+        const a = keys.indexOf(anchorKey)
+        const b = keys.indexOf(key)
         if (a !== -1 && b !== -1) {
           const [lo, hi] = a <= b ? [a, b] : [b, a]
-          setSelected(new Set(ids.slice(lo, hi + 1)))
-          setPrimaryId(id)
+          setSelected(new Set(keys.slice(lo, hi + 1)))
+          setPrimaryKey(key)
         } else {
-          selectOnly(id)
+          selectOnly(key)
         }
       } else if (e.metaKey || e.ctrlKey) {
         setSelected((prev) => {
           const next = new Set(prev)
-          if (next.has(id)) next.delete(id)
-          else next.add(id)
+          if (next.has(key)) next.delete(key)
+          else next.add(key)
           return next
         })
-        setAnchorId(id)
-        setPrimaryId(id)
+        setAnchorKey(key)
+        setPrimaryKey(key)
       } else {
-        selectOnly(id)
+        selectOnly(key)
       }
     },
-    [items, anchorId, selectOnly],
+    [entries, anchorKey, selectOnly],
   )
 
-  /** Двойной клик: полноэкранный просмотр. */
+  /** Двойной клик / Enter: полноэкранный просмотр (для групп — плеер). */
   const openLightbox = useCallback(
-    (asset: Asset) => {
-      selectOnly(asset.id)
-      setLightboxId(asset.id)
+    (entry: Entry) => {
+      selectOnly(entry.key)
+      setLightbox(entry)
     },
     [selectOnly],
   )
+
+  /** Раскрытие группы до клипов / клипа до кадров (Unity-style, на месте). */
+  const toggleExpand = useCallback((entry: Entry) => {
+    if (entry.type === 'group') {
+      setExpandedGroups((prev) => {
+        const next = new Map(prev)
+        if (next.has(entry.key)) next.delete(entry.key)
+        else next.set(entry.key, entry.ref)
+        return next
+      })
+    } else if (entry.type === 'clip') {
+      setExpandedClips((prev) => {
+        const next = new Set(prev)
+        if (next.has(entry.key)) next.delete(entry.key)
+        else next.add(entry.key)
+        return next
+      })
+    }
+  }, [])
+
+  const toggleGroupAnims = useCallback(() => {
+    setGroupAnims((g) => !g)
+    setExpandedGroups(new Map())
+    setExpandedClips(new Set())
+    clearSelection()
+  }, [setGroupAnims, clearSelection])
 
   // ---------- навигация / фильтры ----------
   const selectKind = useCallback(
     (next: DisplayKind | null) => {
       setKind(next)
-      setDir('') // выбор раздела Library сбрасывает папку (как в дизайне)
+      // фильтр по типу применяется к текущей папке, не сбрасывая её на все ассеты
       clearSelection()
     },
     [clearSelection],
@@ -170,10 +243,11 @@ export default function App() {
     setDir(asset.parentDir)
     setKind(null)
     setQuery('')
-    setLightboxId(null)
-    setSelected(new Set([asset.id]))
-    setAnchorId(asset.id)
-    setPrimaryId(asset.id)
+    setLightbox(null)
+    const key = `a:${asset.id}`
+    setSelected(new Set([key]))
+    setAnchorKey(key)
+    setPrimaryKey(key)
   }, [])
 
   const selectSource = useCallback(
@@ -183,7 +257,7 @@ export default function App() {
       setKind(null)
       setQuery('')
       clearSelection()
-      setLightboxId(null)
+      setLightbox(null)
     },
     [clearSelection],
   )
@@ -252,69 +326,68 @@ export default function App() {
 
       if (e.key === 'Escape') {
         if (settingsOpen) setSettingsOpen(false)
-        else if (lightboxId !== null) setLightboxId(null)
+        else if (lightbox !== null) setLightbox(null)
         else if (selected.size > 0) clearSelection()
         if (inInput) target?.blur()
         return
       }
       if (inInput) return
 
-      // полноэкранный просмотр открыт — стрелки листают соседние ассеты
-      if (lightboxId !== null) {
+      // полноэкранный просмотр открыт: анимации обрабатывают клавиши сами
+      // (Space/стрелки в Lightbox), для остального стрелки листают соседние строки
+      if (lightbox !== null) {
+        if (isAnimEntry(lightbox)) return
         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
           e.preventDefault()
-          const idx = items.findIndex((a) => a.id === lightboxId)
+          const idx = entries.findIndex((x) => x.key === lightbox.key)
           if (idx !== -1) {
             const ni =
               e.key === 'ArrowRight'
-                ? Math.min(items.length - 1, idx + 1)
+                ? Math.min(entries.length - 1, idx + 1)
                 : Math.max(0, idx - 1)
-            const asset = items[ni]
-            setLightboxId(asset.id)
-            selectOnly(asset.id)
+            openLightbox(entries[ni])
           }
         }
         return
       }
 
-      if (!items.length) return
+      if (!entries.length) return
 
-      const ids = items.map((a) => a.id)
+      const keys = entries.map((x) => x.key)
       if (['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) {
         e.preventDefault()
         const cols = view === 'grid' ? Math.max(1, columnsRef.current) : 1
-        const cur = ids.indexOf(primaryId ?? -1)
+        const cur = keys.indexOf(primaryKey ?? '')
         let next = cur
         if (cur === -1) next = 0
         else if (e.key === 'ArrowRight') next = cur + 1
         else if (e.key === 'ArrowLeft') next = cur - 1
         else if (e.key === 'ArrowDown') next = cur + cols
         else if (e.key === 'ArrowUp') next = cur - cols
-        next = Math.max(0, Math.min(ids.length - 1, next))
-        selectOnly(items[next].id)
-      } else if (e.key === 'Enter' && primaryId !== null) {
+        next = Math.max(0, Math.min(keys.length - 1, next))
+        selectOnly(keys[next])
+      } else if (e.key === 'Enter' && primaryKey !== null) {
         e.preventDefault()
-        const asset = items.find((a) => a.id === primaryId)
-        if (asset) setLightboxId(asset.id)
+        const entry = entries.find((x) => x.key === primaryKey)
+        if (entry) setLightbox(entry)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [paletteOpen, settingsOpen, lightboxId, selected, primaryId, items, view, clearSelection, selectOnly])
+  }, [paletteOpen, settingsOpen, lightbox, selected, primaryKey, entries, view, clearSelection, selectOnly, openLightbox])
 
   // ---------- производные значения ----------
   const activeSource = sources?.find((s) => s.id === activeSourceId)
-  const primaryAsset = useMemo(
-    () => (primaryId !== null ? items.find((a) => a.id === primaryId) ?? null : null),
-    [items, primaryId],
+  const primaryEntry = useMemo(
+    () => (primaryKey !== null ? entries.find((x) => x.key === primaryKey) ?? null : null),
+    [entries, primaryKey],
   )
-  const panelSourceRoot = sources?.find((s) => s.id === primaryAsset?.sourceId)?.root
+  const panelSourceRoot = sources?.find((s) => s.id === primaryEntry?.asset.sourceId)?.root
 
   const lightboxIndex = useMemo(
-    () => (lightboxId !== null ? items.findIndex((a) => a.id === lightboxId) : -1),
-    [items, lightboxId],
+    () => (lightbox !== null ? entries.findIndex((x) => x.key === lightbox.key) : -1),
+    [entries, lightbox],
   )
-  const lightboxAsset = lightboxIndex >= 0 ? items[lightboxIndex] : null
 
   const scanning = scanStatuses?.find(
     (s) =>
@@ -346,6 +419,13 @@ export default function App() {
       { id: 'mdl', icon: <Cube size={16} />, label: 'Show 3D models', hint: 'filter', run: () => selectKind('model') },
       { id: 'aud', icon: <Waveform size={16} />, label: 'Show audio', hint: 'filter', run: () => selectKind('audio') },
       {
+        id: 'anim',
+        icon: <FilmStrip size={16} />,
+        label: 'Toggle animation grouping',
+        hint: 'view',
+        run: toggleGroupAnims,
+      },
+      {
         id: 'view',
         icon: <Rows size={16} />,
         label: 'Toggle list view',
@@ -356,7 +436,7 @@ export default function App() {
       { id: 'settings', icon: <GearSix size={16} />, label: 'Open settings', hint: 'action', run: () => setSettingsOpen(true) },
       { id: 'add', icon: <FolderPlus size={16} />, label: 'Add folder…', hint: 'action', run: () => setSettingsOpen(true) },
     ],
-    [selectKind, setView, toggleTheme],
+    [selectKind, setView, toggleTheme, toggleGroupAnims],
   )
 
   return (
@@ -402,6 +482,10 @@ export default function App() {
             onQueryChange={setQuery}
             view={view}
             onViewChange={setView}
+            compact={compact}
+            onToggleCompact={toggleCompact}
+            groupAnims={groupAnims}
+            onToggleGroupAnims={toggleGroupAnims}
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen((o) => !o)}
           />
@@ -414,8 +498,8 @@ export default function App() {
             approxNote={clientFilter ? 'filtered on device' : null}
           />
           <ResultsArea
-            items={items}
-            total={total}
+            entries={entries}
+            displayTotal={displayTotal}
             hasMore={assetsQuery.hasNextPage}
             isLoading={assetsQuery.isLoading}
             isLoadingMore={assetsQuery.isFetchingNextPage}
@@ -423,10 +507,12 @@ export default function App() {
             view={view}
             thumbMin={thumbMin}
             showExt={showExt}
+            compact={compact}
             dark={dark}
-            selectedIds={selected}
+            selectedKeys={selected}
             onSelect={handleSelect}
             onOpen={openLightbox}
+            onToggleExpand={toggleExpand}
             onGoToFolder={goToFolder}
             onBackgroundClick={clearSelection}
             onClearFilters={clearFilters}
@@ -450,39 +536,33 @@ export default function App() {
 
         {panelOpen && (
           <DetailPanel
-            asset={primaryAsset}
+            entry={primaryEntry}
             sourceRoot={panelSourceRoot}
             dark={dark}
             selectedCount={selected.size}
             onClose={() => setPanelOpen(false)}
-            onOpenFullscreen={(asset) => setLightboxId(asset.id)}
+            onOpenFullscreen={(entry) => setLightbox(entry)}
             onGoToFolder={goToFolder}
           />
         )}
       </div>
 
-      {lightboxAsset && (
+      {lightbox && (
         <Lightbox
-          key={lightboxAsset.id}
-          asset={lightboxAsset}
+          key={lightbox.key}
+          entry={lightbox}
           hasPrev={lightboxIndex > 0}
-          hasNext={lightboxIndex >= 0 && lightboxIndex < items.length - 1}
+          hasNext={lightboxIndex >= 0 && lightboxIndex < entries.length - 1}
           onPrev={() => {
-            const a = items[lightboxIndex - 1]
-            if (a) {
-              setLightboxId(a.id)
-              selectOnly(a.id)
-            }
+            const x = entries[lightboxIndex - 1]
+            if (x) openLightbox(x)
           }}
           onNext={() => {
-            const a = items[lightboxIndex + 1]
-            if (a) {
-              setLightboxId(a.id)
-              selectOnly(a.id)
-            }
+            const x = entries[lightboxIndex + 1]
+            if (x) openLightbox(x)
           }}
           dark={dark}
-          onClose={() => setLightboxId(null)}
+          onClose={() => setLightbox(null)}
           onGoToFolder={goToFolder}
         />
       )}
@@ -492,7 +572,7 @@ export default function App() {
         onClose={() => setPaletteOpen(false)}
         commands={commands}
         sourceId={activeSourceId}
-        onOpenAsset={openLightbox}
+        onOpenAsset={(asset) => openLightbox(assetEntry(asset))}
       />
 
       <SettingsModal

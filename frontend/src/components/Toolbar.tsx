@@ -1,4 +1,4 @@
-import { MagnifyingGlass, Rows, SidebarSimple, SquaresFour, X } from '@phosphor-icons/react'
+import { FilmStrip, GridNine, MagnifyingGlass, Rows, SidebarSimple, SquaresFour, X } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { ACCENT } from '../theme'
 
@@ -9,11 +9,26 @@ interface Props {
   onQueryChange: (value: string) => void
   view: ViewMode
   onViewChange: (view: ViewMode) => void
+  compact: boolean
+  onToggleCompact: () => void
+  groupAnims: boolean
+  onToggleGroupAnims: () => void
   panelOpen: boolean
   onTogglePanel: () => void
 }
 
-export function Toolbar({ query, onQueryChange, view, onViewChange, panelOpen, onTogglePanel }: Props) {
+export function Toolbar({
+  query,
+  onQueryChange,
+  view,
+  onViewChange,
+  compact,
+  onToggleCompact,
+  groupAnims,
+  onToggleGroupAnims,
+  panelOpen,
+  onTogglePanel,
+}: Props) {
   const [focused, setFocused] = useState(false)
 
   return (
@@ -83,6 +98,50 @@ export function Toolbar({ query, onQueryChange, view, onViewChange, panelOpen, o
           <Rows size={15} weight="bold" />
         </ViewButton>
       </div>
+
+      <button
+        type="button"
+        onClick={onToggleCompact}
+        title={compact ? 'Compact thumbnails on — click to restore captions' : 'Compact thumbnails: smaller cells, no captions'}
+        style={{
+          width: 34,
+          height: 32,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--line2)',
+          borderRadius: 9,
+          cursor: 'pointer',
+          background: compact ? 'var(--inkBg)' : 'var(--card)',
+          color: compact ? 'var(--inkFg)' : 'var(--muted)',
+        }}
+      >
+        <GridNine size={16} weight="bold" />
+      </button>
+
+      <button
+        type="button"
+        onClick={onToggleGroupAnims}
+        title={
+          groupAnims
+            ? 'Animation sequences are grouped — click to show every frame'
+            : 'Group animation sequences into one item'
+        }
+        style={{
+          width: 34,
+          height: 32,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--line2)',
+          borderRadius: 9,
+          cursor: 'pointer',
+          background: groupAnims ? 'var(--inkBg)' : 'var(--card)',
+          color: groupAnims ? 'var(--inkFg)' : 'var(--muted)',
+        }}
+      >
+        <FilmStrip size={16} weight="bold" />
+      </button>
 
       <button
         type="button"

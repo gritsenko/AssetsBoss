@@ -8,13 +8,17 @@ import { AssetThumb } from './AssetThumb'
 interface Props {
   asset: Asset
   selected: boolean
-  thumbSize: 256 | 512
+  thumbSize: 128 | 256 | 512
   showExt: boolean
+  /** Номер кадра внутри клипа — у раскрытых кадров анимации. */
+  frameNo?: number
+  /** Компактный режим: только миниатюра, без подписей и бейджей. */
+  compact?: boolean
   onSelect: (e: React.MouseEvent) => void
   onOpen: (e: React.MouseEvent) => void
 }
 
-export function AssetCard({ asset, selected, thumbSize, showExt, onSelect, onOpen }: Props) {
+export function AssetCard({ asset, selected, thumbSize, showExt, frameNo, compact, onSelect, onOpen }: Props) {
   const { hovered, bind } = useHover()
   const dim = asset.width != null && asset.height != null ? `${asset.width} × ${asset.height}` : null
   const metaLine = [dim, formatSize(asset.size)].filter(Boolean).join(' · ')
@@ -27,7 +31,7 @@ export function AssetCard({ asset, selected, thumbSize, showExt, onSelect, onOpe
       {...bind}
       style={{
         background: 'var(--card)',
-        borderRadius: 12,
+        borderRadius: compact ? 8 : 12,
         border: '1px solid var(--line)',
         overflow: 'hidden',
         cursor: 'pointer',
@@ -39,32 +43,52 @@ export function AssetCard({ asset, selected, thumbSize, showExt, onSelect, onOpe
       }}
     >
       <div style={{ position: 'relative', aspectRatio: '4 / 3', background: 'var(--well)' }}>
-        <AssetThumb asset={asset} size={thumbSize} iconSize={34} />
-        <div
-          className="font-mono"
-          style={{
-            position: 'absolute',
-            right: 8,
-            bottom: 8,
-            fontSize: 9.5,
-            fontWeight: 500,
-            color: '#FFF7EA',
-            background: 'rgba(20,19,16,0.62)',
-            padding: '3px 7px',
-            borderRadius: 5,
-            letterSpacing: '0.04em',
-          }}
-        >
-          {extLabel(asset.ext)}
-        </div>
-        {selected && (
+        <AssetThumb asset={asset} size={thumbSize} iconSize={compact ? 22 : 34} />
+        {!compact && (
           <div
+            className="font-mono"
+            style={{
+              position: 'absolute',
+              right: 8,
+              bottom: 8,
+              fontSize: 9.5,
+              fontWeight: 500,
+              color: '#FFF7EA',
+              background: 'rgba(20,19,16,0.62)',
+              padding: '3px 7px',
+              borderRadius: 5,
+              letterSpacing: '0.04em',
+            }}
+          >
+            {extLabel(asset.ext)}
+          </div>
+        )}
+        {frameNo !== undefined && !selected && !compact && (
+          <div
+            className="font-mono"
             style={{
               position: 'absolute',
               left: 8,
               top: 8,
-              width: 22,
-              height: 22,
+              fontSize: 9.5,
+              fontWeight: 600,
+              color: '#FFF7EA',
+              background: 'rgba(20,19,16,0.62)',
+              padding: '3px 7px',
+              borderRadius: 5,
+            }}
+          >
+            #{frameNo}
+          </div>
+        )}
+        {selected && (
+          <div
+            style={{
+              position: 'absolute',
+              left: compact ? 5 : 8,
+              top: compact ? 5 : 8,
+              width: compact ? 17 : 22,
+              height: compact ? 17 : 22,
               borderRadius: '50%',
               background: ACCENT,
               display: 'flex',
@@ -73,10 +97,11 @@ export function AssetCard({ asset, selected, thumbSize, showExt, onSelect, onOpe
               boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
             }}
           >
-            <Check size={12} weight="bold" color="#FFF9EF" />
+            <Check size={compact ? 10 : 12} weight="bold" color="#FFF9EF" />
           </div>
         )}
       </div>
+      {compact ? null : (
       <div style={{ padding: '9px 12px 11px' }}>
         <div
           style={{
@@ -103,6 +128,7 @@ export function AssetCard({ asset, selected, thumbSize, showExt, onSelect, onOpe
           {metaLine}
         </div>
       </div>
+      )}
     </div>
   )
 }

@@ -63,7 +63,11 @@ public sealed class Db
         return (long)cmd.ExecuteScalar()!;
     }
 
-    private static readonly string[] Migrations = [LoadEmbedded("Schema.sql")];
+    private static readonly string[] Migrations =
+    [
+        LoadEmbedded("Schema.sql"),
+        LoadEmbedded("Migration2.sql"),
+    ];
 
     private static string LoadEmbedded(string name)
     {

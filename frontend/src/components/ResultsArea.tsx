@@ -1,20 +1,26 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowsOut, Files, FolderOpen } from '@phosphor-icons/react'
+import { ArrowsOut, CaretDown, CaretUp, Files, FolderOpen } from '@phosphor-icons/react'
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Asset } from '../api/types'
 import { useHover } from '../hooks/useHover'
+import { bandKey, type Entry } from '../lib/anim'
 import { AssetCard } from './AssetCard'
 import { AssetRow } from './AssetRow'
 import { ContextMenu, type MenuItem } from './ContextMenu'
+import { GroupCard, GroupRow } from './GroupCard'
 
-const GAP = 14
+const GAP = 16
 const THUMB_MIN_FALLBACK = 216
 const LIST_ROW_HEIGHT = 70
-const CAPTION_HEIGHT = 46
+const CAPTION_HEIGHT = 54
+const LIST_INDENT = 26
+/** Насколько «полоса» раскрытой группы выступает за края ячеек. */
+const BAND_PAD = 5
 
 interface Props {
-  items: Asset[]
-  total: number
+  entries: Entry[]
+  /** Всего строк с учётом не догруженных страниц и раскрытых групп. */
+  displayTotal: number
   hasMore: boolean
   isLoading: boolean
   isLoadingMore: boolean
@@ -22,10 +28,13 @@ interface Props {
   view: 'grid' | 'list'
   thumbMin: number
   showExt: boolean
+  /** Компактный режим: только миниатюры, без подписей. */
+  compact: boolean
   dark: boolean
-  selectedIds: Set<number>
-  onSelect: (asset: Asset, e: React.MouseEvent) => void
-  onOpen: (asset: Asset, e?: React.MouseEvent) => void
+  selectedKeys: Set<string>
+  onSelect: (entry: Entry, e: React.MouseEvent) => void
+  onOpen: (entry: Entry, e?: React.MouseEvent) => void
+  onToggleExpand: (entry: Entry) => void
   onGoToFolder: (asset: Asset) => void
   onBackgroundClick: () => void
   onClearFilters: () => void
@@ -34,8 +43,8 @@ interface Props {
 }
 
 export function ResultsArea({
-  items,
-  total,
+  entries,
+  displayTotal,
   hasMore,
   isLoading,
   isLoadingMore,
@@ -43,10 +52,12 @@ export function ResultsArea({
   view,
   thumbMin,
   showExt,
+  compact,
   dark,
-  selectedIds,
+  selectedKeys,
   onSelect,
   onOpen,
+  onToggleExpand,
   onGoToFolder,
   onBackgroundClick,
   onClearFilters,
@@ -54,13 +65,13 @@ export function ResultsArea({
   folders,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const [menu, setMenu] = useState<{ x: number; y: number; asset: Asset } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: Entry } | null>(null)
 
   const openMenu = useCallback(
-    (asset: Asset, e: React.MouseEvent) => {
+    (entry: Entry, e: React.MouseEvent) => {
       e.preventDefault()
-      onSelect(asset, e) // правый клик без модификаторов выделяет ассет
-      setMenu({ x: e.clientX, y: e.clientY, asset })
+      onSelect(entry, e) // правый клик без модификаторов выделяет ассет
+      setMenu({ x: e.clientX, y: e.clientY, entry })
     },
     [onSelect],
   )
@@ -92,9 +103,12 @@ export function ResultsArea({
   const avail = width - 40 // padding 20px по бокам
   const columns = isGrid ? Math.max(1, Math.floor((avail + GAP) / ((thumbMin || THUMB_MIN_FALLBACK) + GAP))) : 1
   const cellWidth = isGrid ? Math.floor((avail - GAP * (columns - 1)) / columns) : avail
-  const thumbSize: 256 | 512 = cellWidth > 220 ? 512 : 256
-  const rowHeight = isGrid ? Math.round((cellWidth * 3) / 4) + CAPTION_HEIGHT + GAP : LIST_ROW_HEIGHT
-  const rowCount = Math.ceil(total / columns)
+  const thumbSize: 128 | 256 | 512 = cellWidth > 220 ? 512 : cellWidth > 130 ? 256 : 128
+  const rowHeight = isGrid
+    ? Math.round((cellWidth * 3) / 4) + (compact ? 0 : CAPTION_HEIGHT) + GAP
+    : LIST_ROW_HEIGHT
+  const bandBg = dark ? 'rgba(217,110,52,0.10)' : 'rgba(217,110,52,0.07)'
+  const rowCount = Math.ceil(displayTotal / columns)
 
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -113,30 +127,107 @@ export function ResultsArea({
   const lastIndex = virtualRows.at(-1)?.index ?? 0
   const needed = (lastIndex + 1) * columns + columns * 3
   useEffect(() => {
-    if (hasMore && !isLoadingMore && items.length < needed) loadMore()
-  }, [hasMore, isLoadingMore, items.length, needed, loadMore])
+    if (hasMore && !isLoadingMore && entries.length < needed) loadMore()
+  }, [hasMore, isLoadingMore, entries.length, needed, loadMore])
 
   useEffect(() => {
     onColumns?.(columns)
   }, [columns, onColumns])
 
-  const showEmpty = !isLoading && total === 0 && !hasMore
-  const showLoading = isLoading || (total === 0 && hasMore)
+  const showEmpty = !isLoading && displayTotal === 0 && !hasMore
+  const showLoading = isLoading || (displayTotal === 0 && hasMore)
 
   const menuItems: MenuItem[] = menu
     ? [
+        ...(menu.entry.type === 'group' || menu.entry.type === 'clip'
+          ? [
+              {
+                icon: menu.entry.expanded ? <CaretUp size={15} /> : <CaretDown size={15} />,
+                label: menu.entry.expanded
+                  ? 'Collapse'
+                  : menu.entry.type === 'group'
+                    ? 'Expand animations'
+                    : 'Expand frames',
+                onClick: () => onToggleExpand(menu.entry),
+              },
+            ]
+          : []),
         {
           icon: <FolderOpen size={15} />,
           label: 'Go to folder',
-          onClick: () => onGoToFolder(menu.asset),
+          onClick: () => onGoToFolder(menu.entry.asset),
         },
         {
           icon: <ArrowsOut size={15} />,
           label: 'Open fullscreen',
-          onClick: () => onOpen(menu.asset),
+          onClick: () => onOpen(menu.entry),
         },
       ]
     : []
+
+  const renderCard = (entry: Entry) =>
+    entry.type === 'group' || entry.type === 'clip' ? (
+      <GroupCard
+        entry={entry}
+        selected={selectedKeys.has(entry.key)}
+        thumbSize={thumbSize}
+        compact={compact}
+        onSelect={(e) => onSelect(entry, e)}
+        onOpen={(e) => onOpen(entry, e)}
+        onToggleExpand={() => onToggleExpand(entry)}
+      />
+    ) : (
+      <AssetCard
+        asset={entry.asset}
+        selected={selectedKeys.has(entry.key)}
+        thumbSize={thumbSize}
+        showExt={showExt}
+        frameNo={entry.type === 'frame' ? entry.frameIndex + 1 : undefined}
+        compact={compact}
+        onSelect={(e) => onSelect(entry, e)}
+        onOpen={(e) => onOpen(entry, e)}
+      />
+    )
+
+  /** Подряд идущие ячейки одной раскрытой группы — под общую цветную полосу. */
+  const bandSegments = (cells: (Entry | undefined)[]) => {
+    const segments: { start: number; span: number }[] = []
+    let runKey: string | null = null
+    let runStart = 0
+    for (let col = 0; col <= cells.length; col++) {
+      const key = col < cells.length && cells[col] ? bandKey(cells[col]!) : null
+      if (key !== runKey) {
+        if (runKey !== null) segments.push({ start: runStart, span: col - runStart })
+        runKey = key
+        runStart = col
+      }
+    }
+    return segments
+  }
+
+  const renderRow = (entry: Entry) => {
+    const depth = entry.type === 'clip' || entry.type === 'frame' ? entry.depth : 0
+    const row =
+      entry.type === 'group' || entry.type === 'clip' ? (
+        <GroupRow
+          entry={entry}
+          selected={selectedKeys.has(entry.key)}
+          onSelect={(e) => onSelect(entry, e)}
+          onOpen={(e) => onOpen(entry, e)}
+          onToggleExpand={() => onToggleExpand(entry)}
+        />
+      ) : (
+        <AssetRow
+          asset={entry.asset}
+          selected={selectedKeys.has(entry.key)}
+          showExt={showExt}
+          dark={dark}
+          onSelect={(e) => onSelect(entry, e)}
+          onOpen={(e) => onOpen(entry, e)}
+        />
+      )
+    return depth > 0 ? <div style={{ paddingLeft: depth * LIST_INDENT }}>{row}</div> : row
+  }
 
   return (
     <>
@@ -159,11 +250,11 @@ export function ResultsArea({
           {virtualRows.map((row) => {
             const top = row.start - scrollMargin
             if (isGrid) {
-              const cells: (Asset | undefined)[] = []
+              const cells: (Entry | undefined)[] = []
               for (let col = 0; col < columns; col++) {
                 const idx = row.index * columns + col
-                if (idx >= total) break
-                cells.push(items[idx])
+                if (idx >= displayTotal) break
+                cells.push(entries[idx])
               }
               return (
                 <div
@@ -179,21 +270,29 @@ export function ResultsArea({
                     paddingBottom: GAP,
                   }}
                 >
-                  {cells.map((asset, col) =>
-                    asset ? (
+                  {/* общий фон раскрытой группы; полосы соседних строк смыкаются по вертикали */}
+                  {bandSegments(cells).map((seg) => (
+                    <div
+                      key={`band-${row.index}-${seg.start}`}
+                      style={{
+                        position: 'absolute',
+                        top: -(GAP / 2),
+                        height: rowHeight,
+                        left: seg.start * (cellWidth + GAP) - BAND_PAD,
+                        width: seg.span * cellWidth + (seg.span - 1) * GAP + BAND_PAD * 2,
+                        background: bandBg,
+                        borderRadius: 10,
+                      }}
+                    />
+                  ))}
+                  {cells.map((entry, col) =>
+                    entry ? (
                       <div
-                        key={asset.id}
-                        style={{ width: cellWidth }}
-                        onContextMenu={(e) => openMenu(asset, e)}
+                        key={entry.key}
+                        style={{ width: cellWidth, position: 'relative' }}
+                        onContextMenu={(e) => openMenu(entry, e)}
                       >
-                        <AssetCard
-                          asset={asset}
-                          selected={selectedIds.has(asset.id)}
-                          thumbSize={thumbSize}
-                          showExt={showExt}
-                          onSelect={(e) => onSelect(asset, e)}
-                          onOpen={(e) => onOpen(asset, e)}
-                        />
+                        {renderCard(entry)}
                       </div>
                     ) : (
                       <div
@@ -204,6 +303,7 @@ export function ResultsArea({
                           borderRadius: 12,
                           background: 'var(--well)',
                           opacity: 0.5,
+                          position: 'relative',
                         }}
                       />
                     ),
@@ -211,22 +311,29 @@ export function ResultsArea({
                 </div>
               )
             }
-            const asset = items[row.index]
+            const entry = entries[row.index]
+            const band = entry ? bandKey(entry) : null
             return (
               <div
                 key={row.key}
                 style={{ position: 'absolute', top, left: 0, width: '100%', height: rowHeight, paddingBottom: 6 }}
-                onContextMenu={asset ? (e) => openMenu(asset, e) : undefined}
+                onContextMenu={entry ? (e) => openMenu(entry, e) : undefined}
               >
-                {asset ? (
-                  <AssetRow
-                    asset={asset}
-                    selected={selectedIds.has(asset.id)}
-                    showExt={showExt}
-                    dark={dark}
-                    onSelect={(e) => onSelect(asset, e)}
-                    onOpen={(e) => onOpen(asset, e)}
+                {band && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: -3,
+                      height: rowHeight,
+                      left: -BAND_PAD,
+                      right: -BAND_PAD,
+                      background: bandBg,
+                      borderRadius: 10,
+                    }}
                   />
+                )}
+                {entry ? (
+                  <div style={{ position: 'relative' }}>{renderRow(entry)}</div>
                 ) : (
                   <div style={{ height: rowHeight - 6, borderRadius: 10, background: 'var(--well)', opacity: 0.5 }} />
                 )}

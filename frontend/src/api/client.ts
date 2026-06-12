@@ -1,4 +1,13 @@
-import type { Asset, AssetPage, AssetQueryParams, DirNode, ScanStatus, Source } from './types'
+import type {
+  AnimGroupDetail,
+  Asset,
+  AssetPage,
+  AssetQueryParams,
+  DirNode,
+  GroupRef,
+  ScanStatus,
+  Source,
+} from './types'
 
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -42,12 +51,22 @@ export const api = {
     if (params.recursive) search.set('recursive', 'true')
     if (params.kind) search.set('kind', params.kind)
     if (params.q) search.set('q', params.q)
+    if (params.grouped) search.set('grouped', 'true')
     search.set('offset', String(offset))
     search.set('limit', String(limit))
     return http<AssetPage>(`/api/assets?${search}`)
   },
 
   getAsset: (id: number) => http<Asset>(`/api/assets/${id}`),
+
+  getAnimGroup: (ref: GroupRef) => {
+    const search = new URLSearchParams({
+      sourceId: String(ref.sourceId),
+      dir: ref.dir,
+      name: ref.name,
+    })
+    return http<AnimGroupDetail>(`/api/assets/group?${search}`)
+  },
 }
 
 export const thumbUrl = (asset: Asset, size: 128 | 256 | 512) =>

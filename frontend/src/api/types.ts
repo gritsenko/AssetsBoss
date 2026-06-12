@@ -22,13 +22,46 @@ export interface Asset {
   mtime: number
   width: number | null
   height: number | null
+  /** Кластер клипов («персонаж») в пределах папки; null — не кадр анимации. */
+  animGroup: string | null
+  /** Имя клипа (базовое имя файла без номера кадра). */
+  animClip: string | null
+  /** Номер кадра из имени файла. */
+  animFrame: number | null
+}
+
+/** Строка выдачи /assets: для группы анимаций — обложка (первый кадр) + счётчики. */
+export interface AssetListItem extends Asset {
+  /** Сколько кадров схлопнуто в строку (1 — обычный ассет). */
+  frameCount: number
+  /** Сколько клипов в группе (0 — обычный ассет). */
+  clipCount: number
 }
 
 export interface AssetPage {
-  items: Asset[]
+  items: AssetListItem[]
   total: number
   offset: number
   limit: number
+}
+
+export interface AnimClip {
+  name: string
+  frames: Asset[]
+}
+
+export interface AnimGroupDetail {
+  sourceId: number
+  dir: string
+  name: string
+  clips: AnimClip[]
+}
+
+/** Адрес группы анимаций: источник + папка + имя группы. */
+export interface GroupRef {
+  sourceId: number
+  dir: string
+  name: string
 }
 
 export interface DirNode {
@@ -59,4 +92,6 @@ export interface AssetQueryParams {
   recursive?: boolean
   kind?: AssetKind
   q?: string
+  /** Схлопывать анимационные последовательности в одну строку-группу. */
+  grouped?: boolean
 }

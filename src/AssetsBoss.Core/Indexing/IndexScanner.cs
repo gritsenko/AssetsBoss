@@ -66,6 +66,8 @@ public sealed class IndexScanner(Db db)
 
         SyncDirs(conn, src.Id, allDirs);
 
+        AnimationIndexer.Recompute(conn, src.Id);
+
         conn.Execute("UPDATE sources SET last_scan_at = @now WHERE id = @id",
             new { id = src.Id, now = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
 

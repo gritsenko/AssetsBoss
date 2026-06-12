@@ -20,14 +20,19 @@ public static class AssetsApi
             AssetRepository assets,
             long? sourceId, string? dir, bool recursive = false,
             string? kind = null, string? q = null,
-            int offset = 0, int limit = 200) =>
+            int offset = 0, int limit = 200, bool grouped = false) =>
         {
             limit = Math.Clamp(limit, 1, 500);
             offset = Math.Max(0, offset);
             var page = assets.Query(new AssetQuery(
-                sourceId, dir, recursive, AssetKinds.Parse(kind), q, offset, limit));
+                sourceId, dir, recursive, AssetKinds.Parse(kind), q, offset, limit, grouped));
             return new { page.Items, page.Total, offset, limit };
         });
+
+        group.MapGet("/assets/group", (AssetRepository assets, long sourceId, string name, string? dir) =>
+            assets.GetAnimGroup(sourceId, dir ?? "", name) is { } detail
+                ? Results.Ok(detail)
+                : Results.NotFound());
 
         group.MapGet("/assets/{id:long}", (long id, AssetRepository assets) =>
             assets.GetById(id) is { } asset ? Results.Ok(asset) : Results.NotFound());

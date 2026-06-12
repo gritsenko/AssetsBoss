@@ -21,19 +21,21 @@ interface Props {
  * failure); every other kind shows its display-kind icon centred on the well.
  */
 export function AssetThumb({ asset, size, iconSize = 30 }: Props) {
-  const [failed, setFailed] = useState(false)
+  // failed привязан к id: при подмене ассета (hover-превью кадров) битый кадр
+  // не должен навсегда заменять миниатюру иконкой
+  const [failedId, setFailedId] = useState<number | null>(null)
   const [pixelated, setPixelated] = useState(false)
   const dk = displayKind(asset)
   const Icon = KIND_META[dk].Icon
 
-  if (isThumbable(asset) && !failed) {
+  if (isThumbable(asset) && failedId !== asset.id) {
     return (
       <img
         src={thumbUrl(asset, size)}
         alt={asset.name}
         draggable={false}
         loading="lazy"
-        onError={() => setFailed(true)}
+        onError={() => setFailedId(asset.id)}
         onLoad={(e) => {
           // картинка вписывается целиком (contain), без обрезки; мелкий пиксель-арт,
           // растянутый больше своего натурального размера, рисуем по соседнему пикселю — без размытия

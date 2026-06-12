@@ -33,11 +33,12 @@ export function StatusBar({ leftText, view, thumbMin, onThumbMin, sourcePath }: 
             <SquaresFour size={11} weight="bold" />
             <input
               type="range"
-              min={140}
+              min={64}
               max={320}
               step={4}
               value={thumbMin}
               onChange={(e) => onThumbMin(Number(e.target.value))}
+              title="Thumbnail size — below the threshold captions are hidden"
               style={{ width: 120, accentColor: ACCENT, cursor: 'pointer', margin: 0 }}
             />
             <Square size={13} weight="bold" />

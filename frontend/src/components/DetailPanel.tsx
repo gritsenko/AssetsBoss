@@ -1,10 +1,21 @@
-import { ArrowSquareOut, ArrowsOut, Copy, FolderOpen, ImageSquare, X } from '@phosphor-icons/react'
+import { ArrowSquareOut, ArrowsOut, Copy, FilmStrip, FolderOpen, ImageSquare, X } from '@phosphor-icons/react'
 import { useMemo, useState } from 'react'
 import { contentUrl } from '../api/client'
-import type { Asset } from '../api/types'
+import type { AnimGroupDetail, Asset } from '../api/types'
+import { useAnimGroup } from '../hooks/useAnimGroup'
+import { useFramePlayer } from '../hooks/useFramePlayer'
 import { useHover } from '../hooks/useHover'
+import {
+  type Entry,
+  entryGroupRef,
+  formatGroupName,
+  frameUrl,
+  initialPosition,
+  isAnimEntry,
+} from '../lib/anim'
 import { extLabel, formatDate, formatSize } from '../lib/format'
 import { displayKind } from '../lib/kind'
+import { AnimPlayerControls } from './AnimPlayer'
 import { IconButton } from './ui'
 import { ModelViewer } from './ModelViewer'
 import { useToast } from '../hooks/toastContext'
@@ -20,12 +31,12 @@ const KIND_NAME: Record<string, string> = {
 const PANEL_WIDTH = 360
 
 interface Props {
-  asset: Asset | null
+  entry: Entry | null
   sourceRoot: string | undefined
   dark: boolean
   selectedCount: number
   onClose: () => void
-  onOpenFullscreen: (asset: Asset) => void
+  onOpenFullscreen: (entry: Entry) => void
   onGoToFolder: (asset: Asset) => void
 }
 
@@ -37,7 +48,16 @@ function joinPath(root: string | undefined, relPath: string): string {
   return `${trimmed}${sep}${rel}`
 }
 
-export function DetailPanel({ asset, sourceRoot, dark, selectedCount, onClose, onOpenFullscreen, onGoToFolder }: Props) {
+export function DetailPanel({ entry, sourceRoot, dark, selectedCount, onClose, onOpenFullscreen, onGoToFolder }: Props) {
+  const title =
+    entry === null
+      ? 'Details'
+      : entry.type === 'group'
+        ? formatGroupName(entry.ref.name)
+        : entry.type === 'clip'
+          ? entry.clipName
+          : entry.asset.name
+
   return (
     <div
       style={{
@@ -61,25 +81,37 @@ export function DetailPanel({ asset, sourceRoot, dark, selectedCount, onClose, o
             overflow: 'hidden',
             textOverflow: 'ellipsis',
           }}
-          title={asset?.name}
+          title={title}
         >
-          {selectedCount > 1 ? `${selectedCount} assets selected` : asset?.name ?? 'Details'}
+          {selectedCount > 1 ? `${selectedCount} assets selected` : title}
         </div>
         <IconButton onClick={onClose} title="Hide panel" size={28}>
           <X size={15} weight="bold" />
         </IconButton>
       </div>
 
-      {asset ? (
-        <Body
-          key={asset.id}
-          asset={asset}
-          sourceRoot={sourceRoot}
-          dark={dark}
-          selectedCount={selectedCount}
-          onOpenFullscreen={onOpenFullscreen}
-          onGoToFolder={onGoToFolder}
-        />
+      {entry ? (
+        isAnimEntry(entry) ? (
+          <AnimBody
+            key={entry.key}
+            entry={entry}
+            sourceRoot={sourceRoot}
+            selectedCount={selectedCount}
+            onOpenFullscreen={onOpenFullscreen}
+            onGoToFolder={onGoToFolder}
+          />
+        ) : (
+          <Body
+            key={entry.key}
+            entry={entry}
+            asset={entry.asset}
+            sourceRoot={sourceRoot}
+            dark={dark}
+            selectedCount={selectedCount}
+            onOpenFullscreen={onOpenFullscreen}
+            onGoToFolder={onGoToFolder}
+          />
+        )
       ) : (
         <Empty />
       )}
@@ -87,7 +119,232 @@ export function DetailPanel({ asset, sourceRoot, dark, selectedCount, onClose, o
   )
 }
 
+/* ---------- анимационные группы / клипы / кадры ---------- */
+
+function AnimBody({
+  entry,
+  sourceRoot,
+  selectedCount,
+  onOpenFullscreen,
+  onGoToFolder,
+}: {
+  entry: Entry
+  sourceRoot: string | undefined
+  selectedCount: number
+  onOpenFullscreen: (entry: Entry) => void
+  onGoToFolder: (asset: Asset) => void
+}) {
+  const ref = entryGroupRef(entry)
+  const { data: detail } = useAnimGroup(ref)
+
+  if (!detail) {
+    return (
+      <div style={{ padding: '120px 24px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+        Loading animation…
+      </div>
+    )
+  }
+  return (
+    <AnimLoaded
+      entry={entry}
+      detail={detail}
+      sourceRoot={sourceRoot}
+      selectedCount={selectedCount}
+      onOpenFullscreen={onOpenFullscreen}
+      onGoToFolder={onGoToFolder}
+    />
+  )
+}
+
+function AnimLoaded({
+  entry,
+  detail,
+  sourceRoot,
+  selectedCount,
+  onOpenFullscreen,
+  onGoToFolder,
+}: {
+  entry: Entry
+  detail: AnimGroupDetail
+  sourceRoot: string | undefined
+  selectedCount: number
+  onOpenFullscreen: (entry: Entry) => void
+  onGoToFolder: (asset: Asset) => void
+}) {
+  const showToast = useToast()
+  const initial = useMemo(() => initialPosition(entry, detail), [entry, detail])
+  const [clipIdx, setClipIdx] = useState(initial.clip)
+  const clip = detail.clips[Math.min(clipIdx, detail.clips.length - 1)]
+  const player = useFramePlayer(clip.frames, initial.frame)
+  const [pixelated, setPixelated] = useState(false)
+
+  const cover = player.frame ?? clip.frames[0]
+  const totalFrames = detail.clips.reduce((n, c) => n + c.frames.length, 0)
+  const folderPath = useMemo(
+    () => joinPath(sourceRoot, detail.dir.length > 0 ? detail.dir : ''),
+    [sourceRoot, detail.dir],
+  )
+
+  const metaRows = [
+    { k: 'Format', v: `${extLabel(cover.ext)} · Animation` },
+    {
+      k: 'Clips',
+      v: detail.clips.length > 1 ? `${detail.clips.length} · ${totalFrames} frames total` : '1',
+    },
+    { k: 'Frames', v: `${clip.frames.length} in ${clip.name}` },
+    cover.width != null && cover.height != null
+      ? { k: 'Dimensions', v: `${cover.width} × ${cover.height}` }
+      : null,
+    { k: 'Added', v: formatDate(cover.mtime) },
+    { k: 'Folder', v: detail.dir || '—', onClick: () => onGoToFolder(cover) },
+  ].filter((r): r is { k: string; v: string; onClick?: () => void } => r !== null)
+
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(folderPath)
+      showToast('Path copied to clipboard')
+    } catch {
+      showToast('Could not copy path')
+    }
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      {selectedCount > 1 && (
+        <div
+          className="font-mono"
+          style={{ padding: '0 16px 10px', fontSize: 10.5, color: 'var(--faint)' }}
+        >
+          Showing last selected
+        </div>
+      )}
+
+      <div
+        onDoubleClick={() => onOpenFullscreen(entry)}
+        style={{
+          margin: '0 16px',
+          borderRadius: 12,
+          overflow: 'hidden',
+          background: 'var(--well)',
+          height: 246,
+          position: 'relative',
+          flex: '0 0 auto',
+        }}
+      >
+        {player.frame && (
+          <div
+            onClick={() => onOpenFullscreen(entry)}
+            style={{ position: 'absolute', inset: 0, overflow: 'hidden', cursor: 'zoom-in' }}
+          >
+            <img
+              src={frameUrl(player.frame)}
+              alt={player.frame.name}
+              draggable={false}
+              onLoad={(e) => {
+                const img = e.currentTarget
+                setPixelated(img.naturalWidth > 0 && img.naturalWidth < img.clientWidth)
+              }}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                imageRendering: pixelated ? 'pixelated' : 'auto',
+              }}
+            />
+          </div>
+        )}
+        <div
+          className="font-mono"
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: 10,
+            pointerEvents: 'none',
+            fontSize: 9.5,
+            color: '#FFF7EA',
+            background: 'rgba(20,19,16,0.62)',
+            padding: '3px 8px',
+            borderRadius: 5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+          }}
+        >
+          <FilmStrip size={11} weight="bold" />
+          {player.frame?.name}
+        </div>
+      </div>
+
+      <div style={{ padding: '10px 16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <AnimPlayerControls
+          detail={detail}
+          clipIndex={Math.min(clipIdx, detail.clips.length - 1)}
+          onSelectClip={setClipIdx}
+          player={player}
+        />
+      </div>
+
+      <div style={{ padding: '14px 16px 0', display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {metaRows.map((m) => (
+          <MetaRow key={m.k} k={m.k} v={m.v} onClick={m.onClick} />
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            className="font-mono"
+            style={{
+              width: 84,
+              flex: '0 0 auto',
+              fontSize: 9.5,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: 'var(--faint)',
+            }}
+          >
+            Path
+          </div>
+          <div
+            className="font-mono"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 10.5,
+              color: 'var(--muted)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={folderPath}
+          >
+            {folderPath}
+          </div>
+          <CopyButton onClick={copyPath} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 'auto', padding: '18px 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <ActionButton onClick={() => onOpenFullscreen(entry)} primary>
+          <ArrowsOut size={13} weight="bold" />
+          Open fullscreen
+        </ActionButton>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <ActionButton onClick={() => onGoToFolder(cover)}>
+            <FolderOpen size={13} weight="bold" />
+            Go to folder
+          </ActionButton>
+          <ActionButton onClick={copyPath}>
+            <Copy size={13} weight="bold" />
+            Copy path
+          </ActionButton>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- одиночные ассеты ---------- */
+
 function Body({
+  entry,
   asset,
   sourceRoot,
   dark,
@@ -95,11 +352,12 @@ function Body({
   onOpenFullscreen,
   onGoToFolder,
 }: {
+  entry: Entry
   asset: Asset
   sourceRoot: string | undefined
   dark: boolean
   selectedCount: number
-  onOpenFullscreen: (asset: Asset) => void
+  onOpenFullscreen: (entry: Entry) => void
   onGoToFolder: (asset: Asset) => void
 }) {
   const showToast = useToast()
@@ -139,7 +397,7 @@ function Body({
       )}
 
       <div
-        onDoubleClick={() => onOpenFullscreen(asset)}
+        onDoubleClick={() => onOpenFullscreen(entry)}
         style={{
           margin: '0 16px',
           borderRadius: 12,
@@ -150,7 +408,7 @@ function Body({
           flex: '0 0 auto',
         }}
       >
-        <Preview asset={asset} dk={dk} dark={dark} onOpenFullscreen={() => onOpenFullscreen(asset)} />
+        <Preview asset={asset} dk={dk} dark={dark} onOpenFullscreen={() => onOpenFullscreen(entry)} />
       </div>
 
       <div style={{ padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -191,7 +449,7 @@ function Body({
       </div>
 
       <div style={{ marginTop: 'auto', padding: '18px 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <ActionButton onClick={() => onOpenFullscreen(asset)} primary>
+        <ActionButton onClick={() => onOpenFullscreen(entry)} primary>
           <ArrowsOut size={13} weight="bold" />
           Open fullscreen
         </ActionButton>

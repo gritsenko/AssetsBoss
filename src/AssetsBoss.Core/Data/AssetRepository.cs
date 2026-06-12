@@ -11,25 +11,36 @@ public sealed record AssetQuery(
     AssetKind? Kind,
     string? Search,
     int Offset,
-    int Limit);
+    int Limit,
+    bool Grouped = false);
 
-public sealed record AssetPage(IReadOnlyList<Asset> Items, int Total);
+public sealed record AssetPage(IReadOnlyList<AssetListItem> Items, int Total);
 
 public sealed record DirNode(string Path, string Name, bool HasChildren);
+
+public sealed record AnimClipDto(string Name, IReadOnlyList<Asset> Frames);
+
+public sealed record AnimGroupDetail(long SourceId, string Dir, string Name, IReadOnlyList<AnimClipDto> Clips);
 
 public sealed class AssetRepository(Db db)
 {
     private const string AssetColumns =
         """
         a.id, a.source_id AS sourceId, a.rel_path AS relPath, a.parent_dir AS parentDir,
-        a.name, a.ext, a.kind, a.size, a.mtime, a.width, a.height
+        a.name, a.ext, a.kind, a.size, a.mtime, a.width, a.height,
+        a.anim_group AS animGroup, a.anim_clip AS animClip
         """;
+
+    /// <summary>Ключ группировки строки выдачи: группа анимаций или сам ассет.</summary>
+    private const string GroupKey =
+        "CASE WHEN a.anim_group IS NULL THEN 'i' || a.id" +
+        " ELSE 'g' || a.source_id || '|' || a.parent_dir || '|' || a.anim_group END";
 
     public Asset? GetById(long id)
     {
         using var conn = db.Open();
         return conn.QuerySingleOrDefault<Asset>(
-            $"SELECT {AssetColumns} FROM assets a WHERE a.id = @id", new { id });
+            $"SELECT {AssetColumns}, a.anim_frame AS animFrame FROM assets a WHERE a.id = @id", new { id });
     }
 
     public AssetPage Query(AssetQuery q)
@@ -78,15 +89,56 @@ public sealed class AssetRepository(Db db)
         }
 
         using var conn = db.Open();
-        var total = conn.ExecuteScalar<int>($"SELECT COUNT(*) FROM {from} {where}", p);
 
+        if (q.Grouped)
+        {
+            // Группа схлопывается в одну строку; единственный MIN-агрегат притягивает
+            // остальные колонки к строке первого кадра (правило bare columns SQLite),
+            // поэтому обложка группы — её первый кадр. Сортировка по имени обложки.
+            var totalGrouped = conn.ExecuteScalar<int>(
+                $"SELECT COUNT(DISTINCT {GroupKey}) FROM {from} {where}", p);
+            p.Add("limit", q.Limit);
+            p.Add("offset", q.Offset);
+            var grouped = conn.Query<AssetListItem>(
+                $"""
+                 SELECT {AssetColumns}, MIN(a.anim_frame) AS animFrame,
+                        COUNT(*) AS frameCount, COUNT(DISTINCT a.anim_clip) AS clipCount
+                 FROM {from} {where}
+                 GROUP BY {GroupKey}
+                 ORDER BY a.name LIMIT @limit OFFSET @offset
+                 """, p).ToList();
+            return new AssetPage(grouped, totalGrouped);
+        }
+
+        var total = conn.ExecuteScalar<int>($"SELECT COUNT(*) FROM {from} {where}", p);
         p.Add("limit", q.Limit);
         p.Add("offset", q.Offset);
+
         var order = fts is not null ? "ORDER BY rank, a.name" : "ORDER BY a.name";
-        var items = conn.Query<Asset>(
-            $"SELECT {AssetColumns} FROM {from} {where} {order} LIMIT @limit OFFSET @offset", p).ToList();
+        var items = conn.Query<AssetListItem>(
+            $"SELECT {AssetColumns}, a.anim_frame AS animFrame FROM {from} {where} {order} LIMIT @limit OFFSET @offset",
+            p).ToList();
 
         return new AssetPage(items, total);
+    }
+
+    /// <summary>Полное содержимое группы анимаций: клипы с кадрами в порядке номеров.</summary>
+    public AnimGroupDetail? GetAnimGroup(long sourceId, string dir, string name)
+    {
+        using var conn = db.Open();
+        var frames = conn.Query<Asset>(
+            $"""
+             SELECT {AssetColumns}, a.anim_frame AS animFrame FROM assets a
+             WHERE a.source_id = @sourceId AND a.parent_dir = @dir AND a.anim_group = @name
+             ORDER BY a.anim_clip, a.anim_frame, a.name
+             """, new { sourceId, dir, name }).ToList();
+        if (frames.Count == 0) return null;
+
+        var clips = frames
+            .GroupBy(f => f.AnimClip!)
+            .Select(g => new AnimClipDto(g.Key, g.ToList()))
+            .ToList();
+        return new AnimGroupDetail(sourceId, dir, name, clips);
     }
 
     public IReadOnlyList<DirNode> GetChildDirs(long sourceId, string parent)
