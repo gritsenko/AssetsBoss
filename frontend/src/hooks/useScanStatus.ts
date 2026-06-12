@@ -25,6 +25,8 @@ export function useScanStatus() {
       queryClient.invalidateQueries({ queryKey: ['assets'] })
       queryClient.invalidateQueries({ queryKey: ['dirs'] })
       queryClient.invalidateQueries({ queryKey: ['sources'] })
+      queryClient.invalidateQueries({ queryKey: ['count'] })
+      queryClient.invalidateQueries({ queryKey: ['folderPreview'] })
     }
     hadActive.current = anyActive
   }, [anyActive, queryClient])

@@ -1,53 +1,108 @@
-import { thumbUrl } from '../api/client'
+import { Check } from '@phosphor-icons/react'
 import type { Asset } from '../api/types'
-
-const KIND_ICONS: Record<string, string> = {
-  audio: '🔊',
-  model: '🧊',
-  other: '📄',
-}
+import { ACCENT } from '../theme'
+import { useHover } from '../hooks/useHover'
+import { displayName, extLabel, formatSize } from '../lib/format'
+import { AssetThumb } from './AssetThumb'
 
 interface Props {
   asset: Asset
   selected: boolean
-  onSelect: (asset: Asset) => void
+  thumbSize: 256 | 512
+  showExt: boolean
+  onSelect: (e: React.MouseEvent) => void
+  onOpen: (e: React.MouseEvent) => void
 }
 
-export function AssetCard({ asset, selected, onSelect }: Props) {
-  const thumbable = asset.kind === 'image' && !['.svg', '.psd'].includes(asset.ext.toLowerCase())
+export function AssetCard({ asset, selected, thumbSize, showExt, onSelect, onOpen }: Props) {
+  const { hovered, bind } = useHover()
+  const dim = asset.width != null && asset.height != null ? `${asset.width} × ${asset.height}` : null
+  const metaLine = [dim, formatSize(asset.size)].filter(Boolean).join(' · ')
 
   return (
-    <button
-      onClick={() => onSelect(asset)}
-      className={`flex h-full w-full flex-col overflow-hidden rounded-lg border text-left ${
-        selected
-          ? 'border-blue-500 bg-blue-600/10'
-          : 'border-zinc-800 bg-zinc-900 hover:border-zinc-600'
-      }`}
+    <div
+      onClick={onSelect}
+      onDoubleClick={onOpen}
       title={asset.relPath}
+      {...bind}
+      style={{
+        background: 'var(--card)',
+        borderRadius: 12,
+        border: '1px solid var(--line)',
+        overflow: 'hidden',
+        cursor: 'pointer',
+        outline: `2px solid ${selected ? ACCENT : 'transparent'}`,
+        outlineOffset: -2,
+        transition: 'box-shadow 0.15s ease, transform 0.15s ease',
+        boxShadow: hovered ? '0 10px 28px var(--sh1)' : 'none',
+        transform: hovered ? 'translateY(-2px)' : 'none',
+      }}
     >
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-zinc-950/60">
-        {thumbable ? (
-          <img
-            src={thumbUrl(asset, 256)}
-            alt={asset.name}
-            loading="lazy"
-            className="max-h-full max-w-full object-contain"
-            style={{ imageRendering: 'pixelated' }}
-            onError={(e) => {
-              // битый/недекодируемый файл — заменяем иконкой
-              const el = e.currentTarget
-              el.style.display = 'none'
-              el.parentElement!.insertAdjacentHTML('beforeend', '<span class="text-3xl">🖼️</span>')
+      <div style={{ position: 'relative', aspectRatio: '4 / 3', background: 'var(--well)' }}>
+        <AssetThumb asset={asset} size={thumbSize} iconSize={34} />
+        <div
+          className="font-mono"
+          style={{
+            position: 'absolute',
+            right: 8,
+            bottom: 8,
+            fontSize: 9.5,
+            fontWeight: 500,
+            color: '#FFF7EA',
+            background: 'rgba(20,19,16,0.62)',
+            padding: '3px 7px',
+            borderRadius: 5,
+            letterSpacing: '0.04em',
+          }}
+        >
+          {extLabel(asset.ext)}
+        </div>
+        {selected && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 8,
+              top: 8,
+              width: 22,
+              height: 22,
+              borderRadius: '50%',
+              background: ACCENT,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
             }}
-          />
-        ) : (
-          <span className="text-3xl">{KIND_ICONS[asset.kind] ?? '📄'}</span>
+          >
+            <Check size={12} weight="bold" color="#FFF9EF" />
+          </div>
         )}
       </div>
-      <div className="shrink-0 px-2 py-1">
-        <p className="truncate text-xs text-zinc-300">{asset.name}</p>
+      <div style={{ padding: '9px 12px 11px' }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {displayName(asset.name, showExt)}
+        </div>
+        <div
+          className="font-mono"
+          style={{
+            marginTop: 3,
+            fontSize: 10.5,
+            color: 'var(--muted)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {metaLine}
+        </div>
       </div>
-    </button>
+    </div>
   )
 }
