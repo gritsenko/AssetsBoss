@@ -4,6 +4,8 @@
 с полнотекстовым поиском (FTS5), кэш миниатюр, аудио-превью. Бекенд — ASP.NET Core
 (.NET 10), фронтенд — React 19 + Vite + Tailwind 4, релизная обёртка — Photino.NET.
 
+<img width="2008" height="1432" alt="image" src="https://github.com/user-attachments/assets/c8af6b25-d19f-4e30-928f-7ba4efcff33e" />
+
 ## Архитектура
 
 Один и тот же Kestrel (только `127.0.0.1`) обслуживает API в dev и release:
