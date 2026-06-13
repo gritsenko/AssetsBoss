@@ -1,9 +1,10 @@
 import { HardDrives, Square, SquaresFour } from '@phosphor-icons/react'
 import { ACCENT } from '../theme'
+import type { ViewMode } from './Toolbar'
 
 interface Props {
   leftText: string
-  view: 'grid' | 'list'
+  view: ViewMode
   thumbMin: number
   onThumbMin: (value: number) => void
   sourcePath: string
@@ -27,7 +28,7 @@ export function StatusBar({ leftText, view, thumbMin, onThumbMin, sourcePath }: 
     >
       <span>{leftText}</span>
       <span style={{ flex: 1 }} />
-      {view === 'grid' && (
+      {view !== 'list' && (
         <>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <SquaresFour size={11} weight="bold" />

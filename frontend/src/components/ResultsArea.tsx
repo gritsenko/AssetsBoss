@@ -8,6 +8,8 @@ import { AssetCard } from './AssetCard'
 import { AssetRow } from './AssetRow'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { GroupCard, GroupRow } from './GroupCard'
+import { ModelGroupCard, ModelGroupRow } from './ModelGroupCard'
+import type { ViewMode } from './Toolbar'
 
 const GAP = 16
 const THUMB_MIN_FALLBACK = 216
@@ -25,10 +27,10 @@ interface Props {
   isLoading: boolean
   isLoadingMore: boolean
   loadMore: () => void
-  view: 'grid' | 'list'
+  view: ViewMode
   thumbMin: number
   showExt: boolean
-  /** Компактный режим: только миниатюры, без подписей. */
+  /** Компактный режим (view === 'icons'): только миниатюры, без подписей. */
   compact: boolean
   dark: boolean
   selectedKeys: Set<string>
@@ -99,7 +101,8 @@ export function ResultsArea({
     setScrollMargin((prev) => (prev === offset ? prev : offset))
   }, [folders, view, width])
 
-  const isGrid = view === 'grid'
+  // icons и grid — одна и та же сетка миниатюр (различие в подписях через compact)
+  const isGrid = view !== 'list'
   const avail = width - 40 // padding 20px по бокам
   const columns = isGrid ? Math.max(1, Math.floor((avail + GAP) / ((thumbMin || THUMB_MIN_FALLBACK) + GAP))) : 1
   const cellWidth = isGrid ? Math.floor((avail - GAP * (columns - 1)) / columns) : avail
@@ -139,7 +142,7 @@ export function ResultsArea({
 
   const menuItems: MenuItem[] = menu
     ? [
-        ...(menu.entry.type === 'group' || menu.entry.type === 'clip'
+        ...(menu.entry.type === 'group' || menu.entry.type === 'clip' || menu.entry.type === 'modelgroup'
           ? [
               {
                 icon: menu.entry.expanded ? <CaretUp size={15} /> : <CaretDown size={15} />,
@@ -147,7 +150,9 @@ export function ResultsArea({
                   ? 'Collapse'
                   : menu.entry.type === 'group'
                     ? 'Expand animations'
-                    : 'Expand frames',
+                    : menu.entry.type === 'modelgroup'
+                      ? 'Expand formats'
+                      : 'Expand frames',
                 onClick: () => onToggleExpand(menu.entry),
               },
             ]
@@ -168,6 +173,16 @@ export function ResultsArea({
   const renderCard = (entry: Entry) =>
     entry.type === 'group' || entry.type === 'clip' ? (
       <GroupCard
+        entry={entry}
+        selected={selectedKeys.has(entry.key)}
+        thumbSize={thumbSize}
+        compact={compact}
+        onSelect={(e) => onSelect(entry, e)}
+        onOpen={(e) => onOpen(entry, e)}
+        onToggleExpand={() => onToggleExpand(entry)}
+      />
+    ) : entry.type === 'modelgroup' ? (
+      <ModelGroupCard
         entry={entry}
         selected={selectedKeys.has(entry.key)}
         thumbSize={thumbSize}
@@ -206,10 +221,19 @@ export function ResultsArea({
   }
 
   const renderRow = (entry: Entry) => {
-    const depth = entry.type === 'clip' || entry.type === 'frame' ? entry.depth : 0
+    const depth =
+      entry.type === 'clip' || entry.type === 'frame' || entry.type === 'variant' ? entry.depth : 0
     const row =
       entry.type === 'group' || entry.type === 'clip' ? (
         <GroupRow
+          entry={entry}
+          selected={selectedKeys.has(entry.key)}
+          onSelect={(e) => onSelect(entry, e)}
+          onOpen={(e) => onOpen(entry, e)}
+          onToggleExpand={() => onToggleExpand(entry)}
+        />
+      ) : entry.type === 'modelgroup' ? (
+        <ModelGroupRow
           entry={entry}
           selected={selectedKeys.has(entry.key)}
           onSelect={(e) => onSelect(entry, e)}

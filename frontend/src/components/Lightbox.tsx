@@ -1,10 +1,11 @@
-import { CaretLeft, CaretRight, CornersOut, FolderOpen, Minus, Plus, X } from '@phosphor-icons/react'
+import { CaretLeft, CaretRight, CornersOut, Cube, FolderOpen, Minus, Plus, X } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { contentUrl } from '../api/client'
+import { contentUrl, thumbUrl } from '../api/client'
 import type { AnimGroupDetail, Asset } from '../api/types'
 import { useAnimGroup } from '../hooks/useAnimGroup'
 import { useFramePlayer } from '../hooks/useFramePlayer'
 import {
+  baseName,
   type Entry,
   entryGroupRef,
   formatClipName,
@@ -14,9 +15,11 @@ import {
   isAnimEntry,
 } from '../lib/anim'
 import { extLabel, formatSize } from '../lib/format'
-import { displayKind } from '../lib/kind'
+import { displayKind, isBrowserRenderableImage } from '../lib/kind'
+import { canViewModel } from '../lib/three/modelFormats'
+import { useModelGroup } from '../hooks/useModelGroup'
 import { AnimPlayerControls } from './AnimPlayer'
-import { ModelViewer } from './ModelViewer'
+import { ModelViewer } from './ModelViewerLazy'
 
 const MIN_SCALE = 1
 const MAX_SCALE = 16
@@ -431,7 +434,12 @@ function AnimContent({
  * увеличении остаётся резкой (nearest-neighbour). Стрелки листают соседние ассеты.
  */
 function AssetLightbox({ entry, hasPrev, hasNext, onPrev, onNext, dark, onClose, onGoToFolder }: Props) {
-  const asset = entry.asset
+  // группа моделей: переключаем показываемый формат, не уходя из лайтбокса
+  const groupRef = entry.type === 'modelgroup' ? entry.ref : null
+  const { data: mg } = useModelGroup(groupRef)
+  const [variantId, setVariantId] = useState<number | null>(null)
+  const asset = (groupRef && mg?.variants.find((v) => v.id === variantId)) || entry.asset
+
   const dk = displayKind(asset)
   const { stageRef, vp, setVp, dragging, zoomStep, stageHandlers } = useViewport(dk === 'image')
   // натуральная и отрисованная (вписанная) ширина — для резкого апскейла пиксель-арта
@@ -446,12 +454,19 @@ function AssetLightbox({ entry, hasPrev, hasNext, onPrev, onNext, dark, onClose,
   return (
     <Shell dark={dark} hasPrev={hasPrev} hasNext={hasNext} onPrev={onPrev} onNext={onNext}>
       <Header
-        title={asset.name}
+        title={groupRef ? baseName(entry.asset.name) : asset.name}
         titleHint={asset.relPath}
         meta={meta}
         onGoToFolder={() => onGoToFolder(asset)}
         onClose={onClose}
       >
+        {groupRef && mg && mg.variants.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {mg.variants.map((v) => (
+              <GlassChip key={v.id} label={extLabel(v.ext)} active={v.id === asset.id} onClick={() => setVariantId(v.id)} />
+            ))}
+          </div>
+        )}
         {dk === 'image' && (
           <div
             style={{
@@ -513,7 +528,7 @@ function AssetLightbox({ entry, hasPrev, hasNext, onPrev, onNext, dark, onClose,
       >
         {dk === 'image' ? (
           <img
-            src={contentUrl(asset)}
+            src={isBrowserRenderableImage(asset.ext) ? contentUrl(asset) : thumbUrl(asset, 1024)}
             alt={asset.name}
             draggable={false}
             onLoad={(e) => setImg({ natW: e.currentTarget.naturalWidth, dispW: e.currentTarget.clientWidth })}
@@ -557,7 +572,25 @@ function Media({ asset, dk, dark }: { asset: Asset; dk: string; dark: boolean })
   if (dk === 'model') {
     return (
       <div style={{ position: 'relative', width: 'min(900px, 92%)', height: '82%', borderRadius: 12, overflow: 'hidden' }}>
-        <ModelViewer assetKey={String(asset.id)} dark={dark} />
+        {canViewModel(asset.ext) ? (
+          <ModelViewer asset={asset} dark={dark} />
+        ) : (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              color: 'rgba(245,241,232,0.6)',
+            }}
+          >
+            <Cube size={40} weight="thin" />
+            <div style={{ fontSize: 13 }}>No 3D preview for {extLabel(asset.ext)}</div>
+          </div>
+        )}
       </div>
     )
   }
@@ -595,6 +628,32 @@ function GlassButton({
       }}
     >
       {children}
+    </button>
+  )
+}
+
+function GlassChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="font-mono"
+      style={{
+        height: 28,
+        padding: '0 10px',
+        border: '1px solid rgba(245,241,232,0.12)',
+        borderRadius: 7,
+        cursor: 'pointer',
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#F5F1E8',
+        background: active ? 'rgba(245,241,232,0.22)' : hovered ? 'rgba(245,241,232,0.12)' : 'transparent',
+      }}
+    >
+      {label}
     </button>
   )
 }

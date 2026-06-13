@@ -58,7 +58,8 @@ function FolderCard({
   const { hovered, bind } = useHover()
   const { data } = useQuery({
     queryKey: ['folderPreview', sourceId, path],
-    queryFn: () => api.getAssets({ sourceId, dir: path, recursive: true }, 0, 4),
+    // разнообразная выборка (разные клипы/подпапки), а не 4 соседних кадра одного клипа
+    queryFn: () => api.getFolderPreview(sourceId, path, 4),
   })
   const items = data?.items ?? []
 

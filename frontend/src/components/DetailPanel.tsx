@@ -1,23 +1,27 @@
-import { ArrowSquareOut, ArrowsOut, Copy, FilmStrip, FolderOpen, ImageSquare, X } from '@phosphor-icons/react'
+import { ArrowSquareOut, ArrowsOut, Copy, Cube, FilmStrip, FolderOpen, ImageSquare, X } from '@phosphor-icons/react'
 import { useMemo, useState } from 'react'
-import { contentUrl } from '../api/client'
+import { contentUrl, thumbUrl } from '../api/client'
 import type { AnimGroupDetail, Asset } from '../api/types'
 import { useAnimGroup } from '../hooks/useAnimGroup'
 import { useFramePlayer } from '../hooks/useFramePlayer'
 import { useHover } from '../hooks/useHover'
 import {
+  baseName,
   type Entry,
   entryGroupRef,
   formatGroupName,
   frameUrl,
   initialPosition,
   isAnimEntry,
+  modelGroupCounts,
 } from '../lib/anim'
+import { useModelGroup } from '../hooks/useModelGroup'
 import { extLabel, formatDate, formatSize } from '../lib/format'
-import { displayKind } from '../lib/kind'
+import { displayKind, isBrowserRenderableImage } from '../lib/kind'
+import { canViewModel } from '../lib/three/modelFormats'
 import { AnimPlayerControls } from './AnimPlayer'
 import { IconButton } from './ui'
-import { ModelViewer } from './ModelViewer'
+import { ModelViewer } from './ModelViewerLazy'
 import { useToast } from '../hooks/toastContext'
 
 const KIND_NAME: Record<string, string> = {
@@ -56,7 +60,9 @@ export function DetailPanel({ entry, sourceRoot, dark, selectedCount, onClose, o
         ? formatGroupName(entry.ref.name)
         : entry.type === 'clip'
           ? entry.clipName
-          : entry.asset.name
+          : entry.type === 'modelgroup'
+            ? baseName(entry.asset.name)
+            : entry.asset.name
 
   return (
     <div
@@ -91,7 +97,17 @@ export function DetailPanel({ entry, sourceRoot, dark, selectedCount, onClose, o
       </div>
 
       {entry ? (
-        isAnimEntry(entry) ? (
+        entry.type === 'modelgroup' ? (
+          <ModelGroupBody
+            key={entry.key}
+            entry={entry}
+            sourceRoot={sourceRoot}
+            dark={dark}
+            selectedCount={selectedCount}
+            onOpenFullscreen={onOpenFullscreen}
+            onGoToFolder={onGoToFolder}
+          />
+        ) : isAnimEntry(entry) ? (
           <AnimBody
             key={entry.key}
             entry={entry}
@@ -472,6 +488,155 @@ function Body({
   )
 }
 
+/* ---------- группа 3D-моделей (форматы одного имени) ---------- */
+
+function ModelGroupBody({
+  entry,
+  sourceRoot,
+  dark,
+  selectedCount,
+  onOpenFullscreen,
+  onGoToFolder,
+}: {
+  entry: Extract<Entry, { type: 'modelgroup' }>
+  sourceRoot: string | undefined
+  dark: boolean
+  selectedCount: number
+  onOpenFullscreen: (entry: Entry) => void
+  onGoToFolder: (asset: Asset) => void
+}) {
+  const showToast = useToast()
+  const { data: detail } = useModelGroup(entry.ref)
+  const variants = detail?.variants ?? [entry.asset]
+  // выбранный для превью формат; по умолчанию — приоритетный (обложка)
+  const [selId, setSelId] = useState<number>(entry.asset.id)
+  const asset = variants.find((v) => v.id === selId) ?? variants[0]
+  const fullPath = useMemo(() => joinPath(sourceRoot, asset.relPath), [sourceRoot, asset.relPath])
+
+  const metaRows = [
+    { k: 'Format', v: `${extLabel(asset.ext)} · 3D model` },
+    { k: 'Formats', v: `${variants.map((v) => extLabel(v.ext)).join(', ')} · ${modelGroupCounts(entry.variantCount)}` },
+    { k: 'Size', v: formatSize(asset.size) },
+    { k: 'Added', v: formatDate(asset.mtime) },
+    { k: 'Folder', v: asset.parentDir || '—', onClick: () => onGoToFolder(asset) },
+  ]
+
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(fullPath)
+      showToast('Path copied to clipboard')
+    } catch {
+      showToast('Could not copy path')
+    }
+  }
+  const openOriginal = () => window.open(contentUrl(asset), '_blank', 'noopener')
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      {selectedCount > 1 && (
+        <div className="font-mono" style={{ padding: '0 16px 10px', fontSize: 10.5, color: 'var(--faint)' }}>
+          Showing last selected
+        </div>
+      )}
+
+      <div
+        onDoubleClick={() => onOpenFullscreen(entry)}
+        style={{
+          margin: '0 16px',
+          borderRadius: 12,
+          overflow: 'hidden',
+          background: 'var(--well)',
+          height: 282,
+          position: 'relative',
+          flex: '0 0 auto',
+        }}
+      >
+        {/* key по asset.id — на смену формата перемонтируем просмотрщик */}
+        <Preview key={asset.id} asset={asset} dk="model" dark={dark} onOpenFullscreen={() => onOpenFullscreen(entry)} />
+      </div>
+
+      {/* переключатель форматов */}
+      <div style={{ padding: '12px 16px 0', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {variants.map((v) => (
+          <FormatChip
+            key={v.id}
+            label={extLabel(v.ext)}
+            active={v.id === asset.id}
+            onClick={() => setSelId(v.id)}
+          />
+        ))}
+      </div>
+
+      <div style={{ padding: '14px 16px 0', display: 'flex', flexDirection: 'column', gap: 9 }}>
+        {metaRows.map((m) => (
+          <MetaRow key={m.k} k={m.k} v={m.v} onClick={'onClick' in m ? m.onClick : undefined} />
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            className="font-mono"
+            style={{ width: 84, flex: '0 0 auto', fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--faint)' }}
+          >
+            Path
+          </div>
+          <div
+            className="font-mono"
+            style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            title={fullPath}
+          >
+            {fullPath}
+          </div>
+          <CopyButton onClick={copyPath} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 'auto', padding: '18px 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <ActionButton onClick={() => onOpenFullscreen(entry)} primary>
+          <ArrowsOut size={13} weight="bold" />
+          Open fullscreen
+        </ActionButton>
+        <ActionButton onClick={() => onGoToFolder(asset)}>
+          <FolderOpen size={13} weight="bold" />
+          Go to folder
+        </ActionButton>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <ActionButton onClick={copyPath}>
+            <Copy size={13} weight="bold" />
+            Copy path
+          </ActionButton>
+          <ActionButton onClick={openOriginal}>
+            <ArrowSquareOut size={13} weight="bold" />
+            Open
+          </ActionButton>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FormatChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  const { hovered, bind } = useHover()
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      {...bind}
+      className="font-mono"
+      style={{
+        border: `1px solid ${active ? 'transparent' : hovered ? 'var(--line3)' : 'var(--line2)'}`,
+        background: active ? 'var(--inkBg)' : 'var(--card)',
+        color: active ? 'var(--inkFg)' : 'var(--ink2)',
+        borderRadius: 7,
+        padding: '5px 11px',
+        cursor: 'pointer',
+        fontSize: 11,
+        fontWeight: 600,
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
 function Empty() {
   return (
     <div
@@ -514,7 +679,7 @@ function Preview({
           style={{ position: 'absolute', inset: 0, overflow: 'hidden', cursor: 'zoom-in' }}
         >
           <img
-            src={contentUrl(asset)}
+            src={isBrowserRenderableImage(asset.ext) ? contentUrl(asset) : thumbUrl(asset, 1024)}
             alt={asset.name}
             draggable={false}
             onLoad={(e) => {
@@ -581,9 +746,10 @@ function Preview({
   }
 
   if (dk === 'model') {
+    if (!canViewModel(asset.ext)) return <ModelUnsupported ext={asset.ext} />
     return (
       <>
-        <ModelViewer assetKey={String(asset.id)} dark={dark} />
+        <ModelViewer asset={asset} dark={dark} />
         <div
           className="font-mono"
           style={{
@@ -605,6 +771,27 @@ function Preview({
   }
 
   return null
+}
+
+/** Модель в формате, который браузерный загрузчик не открывает (.blend/.stl/.dae/.3ds). */
+function ModelUnsupported({ ext }: { ext: string }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        color: 'var(--faint)',
+      }}
+    >
+      <Cube size={34} weight="thin" />
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>No 3D preview for {extLabel(ext)}</div>
+    </div>
+  )
 }
 
 function Waveform({ seed }: { seed: number }) {

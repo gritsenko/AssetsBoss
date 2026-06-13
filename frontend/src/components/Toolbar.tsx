@@ -1,18 +1,27 @@
-import { FilmStrip, GridNine, MagnifyingGlass, Rows, SidebarSimple, SquaresFour, X } from '@phosphor-icons/react'
+import {
+  FilmStrip,
+  GridNine,
+  MagnifyingGlass,
+  Rows,
+  SidebarSimple,
+  SquaresFour,
+  TreeStructure,
+  X,
+} from '@phosphor-icons/react'
 import { useState } from 'react'
 import { ACCENT } from '../theme'
 
-export type ViewMode = 'grid' | 'list'
+export type ViewMode = 'icons' | 'grid' | 'list'
 
 interface Props {
   query: string
   onQueryChange: (value: string) => void
   view: ViewMode
   onViewChange: (view: ViewMode) => void
-  compact: boolean
-  onToggleCompact: () => void
   groupAnims: boolean
   onToggleGroupAnims: () => void
+  recursive: boolean
+  onToggleRecursive: () => void
   panelOpen: boolean
   onTogglePanel: () => void
 }
@@ -22,10 +31,10 @@ export function Toolbar({
   onQueryChange,
   view,
   onViewChange,
-  compact,
-  onToggleCompact,
   groupAnims,
   onToggleGroupAnims,
+  recursive,
+  onToggleRecursive,
   panelOpen,
   onTogglePanel,
 }: Props) {
@@ -91,41 +100,36 @@ export function Toolbar({
           gap: 2,
         }}
       >
-        <ViewButton active={view === 'grid'} onClick={() => onViewChange('grid')}>
+        <ViewButton
+          active={view === 'icons'}
+          onClick={() => onViewChange('icons')}
+          title="Icon view — compact thumbnails without captions"
+        >
+          <GridNine size={15} weight="bold" />
+        </ViewButton>
+        <ViewButton
+          active={view === 'grid'}
+          onClick={() => onViewChange('grid')}
+          title="Grid view — thumbnails with captions"
+        >
           <SquaresFour size={15} weight="bold" />
         </ViewButton>
-        <ViewButton active={view === 'list'} onClick={() => onViewChange('list')}>
+        <ViewButton
+          active={view === 'list'}
+          onClick={() => onViewChange('list')}
+          title="List view"
+        >
           <Rows size={15} weight="bold" />
         </ViewButton>
       </div>
 
       <button
         type="button"
-        onClick={onToggleCompact}
-        title={compact ? 'Compact thumbnails on — click to restore captions' : 'Compact thumbnails: smaller cells, no captions'}
-        style={{
-          width: 34,
-          height: 32,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '1px solid var(--line2)',
-          borderRadius: 9,
-          cursor: 'pointer',
-          background: compact ? 'var(--inkBg)' : 'var(--card)',
-          color: compact ? 'var(--inkFg)' : 'var(--muted)',
-        }}
-      >
-        <GridNine size={16} weight="bold" />
-      </button>
-
-      <button
-        type="button"
         onClick={onToggleGroupAnims}
         title={
           groupAnims
-            ? 'Animation sequences are grouped — click to show every frame'
-            : 'Group animation sequences into one item'
+            ? 'Grouping related files (animation frames, model formats) — click to show every file'
+            : 'Group related files: animation sequences and same-name model formats'
         }
         style={{
           width: 34,
@@ -141,6 +145,30 @@ export function Toolbar({
         }}
       >
         <FilmStrip size={16} weight="bold" />
+      </button>
+
+      <button
+        type="button"
+        onClick={onToggleRecursive}
+        title={
+          recursive
+            ? 'Including assets from subfolders — click to show only the current folder'
+            : 'Showing only the current folder — click to include subfolders'
+        }
+        style={{
+          width: 34,
+          height: 32,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--line2)',
+          borderRadius: 9,
+          cursor: 'pointer',
+          background: recursive ? 'var(--inkBg)' : 'var(--card)',
+          color: recursive ? 'var(--inkFg)' : 'var(--muted)',
+        }}
+      >
+        <TreeStructure size={16} weight="bold" />
       </button>
 
       <button
@@ -170,15 +198,18 @@ function ViewButton({
   active,
   onClick,
   children,
+  title,
 }: {
   active: boolean
   onClick: () => void
   children: React.ReactNode
+  title?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       style={{
         width: 30,
         height: 26,

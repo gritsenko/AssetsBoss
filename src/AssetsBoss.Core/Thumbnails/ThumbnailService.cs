@@ -20,7 +20,7 @@ public sealed record ThumbResult(string FilePath, string ETag);
 /// </summary>
 public sealed class ThumbnailService
 {
-    public static readonly int[] AllowedSizes = [128, 256, 512];
+    public static readonly int[] AllowedSizes = [128, 256, 512, 1024];
 
     private readonly string _cacheRoot;
     private readonly AssetRepository _assets;
@@ -29,7 +29,7 @@ public sealed class ThumbnailService
 
     private static readonly HashSet<string> DecodableExts = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tga",
+        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tga", ".psd",
     };
 
     static ThumbnailService()
@@ -50,13 +50,117 @@ public sealed class ThumbnailService
 
     public static bool CanThumbnail(string ext) => DecodableExts.Contains(ext);
 
+    /// <summary>Канонический размер мастер-превью модели; меньшие сервер ужимает из него.</summary>
+    public const int ModelMasterSize = 512;
+
+    /// <summary>
+    /// Путь в кэше для (ассет, размер, rev). rev — версия клиентского рендера превью моделей:
+    /// её смена даёт новый ключ и инвалидирует старые превью. Для картинок rev=null (ключ как был).
+    /// </summary>
+    private string CachePath(Asset asset, int size, string? rev, out string key)
+    {
+        var baseKey = CacheKey(asset.SourceId, asset.RelPath, asset.Mtime, asset.Size);
+        key = rev is null
+            ? baseKey
+            : Convert.ToHexStringLower(SHA1.HashData(Encoding.UTF8.GetBytes(baseKey + "|r" + rev)));
+        return Path.Combine(_cacheRoot, size.ToString(), key[..2], key + ".webp");
+    }
+
+    /// <summary>
+    /// Превью 3D-модели: сервер их не рендерит (нет headless-GL), мастер (512) кладёт клиент
+    /// через <see cref="SaveAsync"/>. Точный размер отдаём из кэша; меньший — ужимаем из мастера,
+    /// так одного клиентского рендера хватает на все размеры сетки.
+    /// </summary>
+    public async Task<ThumbResult?> GetModelThumbAsync(Asset asset, int size, string? rev, CancellationToken ct)
+    {
+        if (!AllowedSizes.Contains(size)) return null;
+
+        var path = CachePath(asset, size, rev, out var key);
+        if (File.Exists(path)) return new ThumbResult(path, key);
+        if (size >= ModelMasterSize) return null; // мастер крупнее не из чего сделать — рендерит клиент
+
+        var masterPath = CachePath(asset, ModelMasterSize, rev, out _);
+        if (!File.Exists(masterPath)) return null;
+
+        await _throttle.WaitAsync(ct);
+        try
+        {
+            if (File.Exists(path)) return new ThumbResult(path, key); // успел другой запрос
+            using var image = await Image.LoadAsync(masterPath, ct);
+            Downscale(image, size);
+            await WriteWebpAsync(image, path, ct);
+            return new ThumbResult(path, key);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Downscaling model thumb failed for asset {Id}", asset.Id);
+            return null;
+        }
+        finally { _throttle.Release(); }
+    }
+
+    /// <summary>
+    /// Сохраняет клиентский рендер превью модели (PNG/WebP) как мастер: декодирует, ужимает до size
+    /// и перекодирует в WebP — на диск попадает только валидный webp, не сырое тело запроса.
+    /// </summary>
+    public async Task<ThumbResult?> SaveAsync(Asset asset, int size, string? rev, Stream input, CancellationToken ct)
+    {
+        if (!AllowedSizes.Contains(size)) return null;
+
+        var path = CachePath(asset, size, rev, out var key);
+        await _throttle.WaitAsync(ct); // тот же лимит CPU/LOH, что и у генерации картинок
+        try
+        {
+            using var image = await Image.LoadAsync(input, ct);
+            Downscale(image, size);
+            await WriteWebpAsync(image, path, ct);
+            return new ThumbResult(path, key);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Saving uploaded thumbnail failed for asset {Id} ({RelPath})", asset.Id, asset.RelPath);
+            return null;
+        }
+        finally { _throttle.Release(); }
+    }
+
+    /// <summary>Ужимает по большей стороне до size (апскейл не делаем).</summary>
+    private static void Downscale(Image image, int size)
+    {
+        var max = Math.Max(image.Width, image.Height);
+        if (max <= size) return;
+        var scale = (double)size / max;
+        image.Mutate(x => x.Resize(
+            (int)Math.Max(1, Math.Round(image.Width * scale)),
+            (int)Math.Max(1, Math.Round(image.Height * scale))));
+    }
+
+    /// <summary>Пишет webp атомарно: tmp на том же томе → File.Move.</summary>
+    private static async Task WriteWebpAsync(Image image, string path, CancellationToken ct)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var tmp = path + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
+        try
+        {
+            await using (var output = File.Create(tmp))
+                await image.SaveAsync(output, new WebpEncoder { Quality = 80 }, ct);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); } catch { /* best effort */ }
+            throw;
+        }
+    }
+
     public async Task<ThumbResult?> GetOrCreateAsync(
         Asset asset, SourceConfig src, IAssetProvider provider, int size, CancellationToken ct)
     {
         if (!AllowedSizes.Contains(size) || !CanThumbnail(asset.Ext)) return null;
 
-        var key = CacheKey(asset.SourceId, asset.RelPath, asset.Mtime, asset.Size);
-        var path = Path.Combine(_cacheRoot, size.ToString(), key[..2], key + ".webp");
+        var path = CachePath(asset, size, null, out var key);
         if (File.Exists(path)) return new ThumbResult(path, key);
 
         await _throttle.WaitAsync(ct);
@@ -65,34 +169,13 @@ public sealed class ThumbnailService
             if (File.Exists(path)) return new ThumbResult(path, key); // другой запрос успел
 
             await using var input = await provider.OpenReadAsync(src, asset.RelPath, ct);
-            using var image = await Image.LoadAsync(input, ct);
+            using var image = await DecodeAsync(asset.Ext, input, ct);
 
             if (asset.Width is null)
                 _assets.SetDimensions(asset.Id, image.Width, image.Height);
 
-            var max = Math.Max(image.Width, image.Height);
-            if (max > size)
-            {
-                var scale = (double)size / max;
-                image.Mutate(x => x.Resize(
-                    (int)Math.Max(1, Math.Round(image.Width * scale)),
-                    (int)Math.Max(1, Math.Round(image.Height * scale))));
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var tmp = path + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
-            try
-            {
-                await using (var output = File.Create(tmp))
-                    await image.SaveAsync(output, new WebpEncoder { Quality = 80 }, ct);
-                File.Move(tmp, path, overwrite: true); // атомарная публикация в кэш
-            }
-            catch
-            {
-                try { File.Delete(tmp); } catch { /* best effort */ }
-                throw;
-            }
-
+            Downscale(image, size);
+            await WriteWebpAsync(image, path, ct);
             return new ThumbResult(path, key);
         }
         catch (OperationCanceledException) { throw; }
@@ -105,6 +188,21 @@ public sealed class ThumbnailService
         {
             _throttle.Release();
         }
+    }
+
+    /// <summary>
+    /// PSD декодируем своим ридером (composite-слой) — ImageSharp его не понимает; остальное штатно.
+    /// PSD-парсер прыгает по позициям, поэтому буферизуем в память (поток провайдера может быть не seekable).
+    /// </summary>
+    private static async Task<Image> DecodeAsync(string ext, Stream input, CancellationToken ct)
+    {
+        if (!ext.Equals(".psd", StringComparison.OrdinalIgnoreCase))
+            return await Image.LoadAsync(input, ct);
+
+        using var buffer = new MemoryStream();
+        await input.CopyToAsync(buffer, ct);
+        buffer.Position = 0;
+        return PsdDecoder.Decode(buffer);
     }
 
     /// <summary>Нормализация перед хэшем: слэши строго '/', нижний регистр (FOO.png == foo.png на Windows).</summary>

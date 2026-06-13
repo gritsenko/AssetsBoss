@@ -1,5 +1,13 @@
 import { contentUrl, thumbUrl } from '../api/client'
-import type { AnimGroupDetail, Asset, AssetListItem, GroupRef } from '../api/types'
+import type {
+  AnimGroupDetail,
+  Asset,
+  AssetListItem,
+  GroupRef,
+  ModelGroupDetail,
+  ModelGroupRef,
+} from '../api/types'
+import { isBrowserRenderableImage } from './kind'
 
 /**
  * Модель отображаемой строки результатов: обычный ассет, группа анимаций
@@ -37,6 +45,22 @@ export type Entry =
       frameIndex: number
       depth: number
     }
+  | {
+      type: 'modelgroup'
+      key: string
+      asset: AssetListItem // обложка — приоритетный формат (GLTF→GLB→FBX→OBJ)
+      ref: ModelGroupRef
+      variantCount: number
+      expanded: boolean
+      loading: boolean
+    }
+  | {
+      type: 'variant'
+      key: string
+      asset: Asset // конкретный файл-вариант внутри раскрытой группы
+      ref: ModelGroupRef
+      depth: number
+    }
 
 /** Строка выдачи является группой, если сервер схлопнул в неё больше одного кадра. */
 export function isGroupItem(item: AssetListItem): boolean {
@@ -57,6 +81,32 @@ export function clipKey(gkey: string, clipName: string): string {
   return `c:${gkey}/${clipName}`
 }
 
+/* ---------- группы 3D-моделей (одно имя, разные форматы) ---------- */
+
+/** Имя файла без расширения: "Alien.gltf" → "Alien". */
+export function baseName(fileName: string): string {
+  const i = fileName.lastIndexOf('.')
+  return i > 0 ? fileName.slice(0, i) : fileName
+}
+
+/** Строка выдачи — группа моделей, если сервер схлопнул в неё больше одного варианта. */
+export function isModelGroupItem(item: AssetListItem): boolean {
+  return item.kind === 'model' && item.animGroup == null && item.frameCount > 1
+}
+
+export function modelGroupRefOf(item: AssetListItem): ModelGroupRef {
+  return { sourceId: item.sourceId, dir: item.parentDir, name: baseName(item.name) }
+}
+
+export function modelGroupKey(ref: ModelGroupRef): string {
+  return `mg:${ref.sourceId}|${ref.dir}|${ref.name.toLowerCase()}`
+}
+
+/** Подпись группы моделей: "4 formats" / "1 format". */
+export function modelGroupCounts(count: number): string {
+  return `${count} format${count === 1 ? '' : 's'}`
+}
+
 /** "01_*_sword" → "01 sword" (звёздочка — позиция токена-действия). */
 export function formatGroupName(name: string): string {
   return name.split('_').filter((t) => t !== '*').join(' ') || name
@@ -75,6 +125,8 @@ export function formatClipName(clipName: string, groupName: string): string {
 
 /** URL кадра для плеера: оригинал для мелких файлов, иначе миниатюра 512. */
 export function frameUrl(frame: Asset): string {
+  // нерендеримые браузером форматы (.psd, .tga) — только через серверный рендер
+  if (!isBrowserRenderableImage(frame.ext)) return thumbUrl(frame, 512)
   return frame.size <= 400_000 ? contentUrl(frame) : thumbUrl(frame, 512)
 }
 
@@ -110,7 +162,9 @@ export function entryCounts(entry: Extract<Entry, { type: 'group' | 'clip' }>): 
  */
 export function bandKey(entry: Entry): string | null {
   if (entry.type === 'group') return entry.expanded ? entry.key : null
+  if (entry.type === 'modelgroup') return entry.expanded ? entry.key : null
   if (entry.type === 'clip' || entry.type === 'frame') return groupKey(entry.ref)
+  if (entry.type === 'variant') return modelGroupKey(entry.ref)
   return null
 }
 
@@ -119,9 +173,11 @@ export function assetEntry(asset: Asset): Entry {
   return { type: 'asset', key: `a:${asset.id}`, asset: { ...asset, frameCount: 1, clipCount: 0 } }
 }
 
-/** Entry умеет проигрываться: группа/клип/кадр либо ассет, входящий в клип. */
+/** Entry умеет проигрываться как анимация: группа/клип/кадр либо ассет-кадр клипа. */
 export function isAnimEntry(entry: Entry): boolean {
-  return entry.type !== 'asset' || entry.asset.animGroup != null
+  if (entry.type === 'group' || entry.type === 'clip' || entry.type === 'frame') return true
+  if (entry.type === 'asset') return entry.asset.animGroup != null
+  return false // modelgroup / variant — это 3D, не анимация
 }
 
 /** Адрес группы для любого анимационного entry. */
@@ -156,9 +212,30 @@ export function buildEntries(
   items: AssetListItem[],
   groupDetails: ReadonlyMap<string, AnimGroupDetail | undefined>,
   expandedClips: ReadonlySet<string>,
+  modelGroupDetails: ReadonlyMap<string, ModelGroupDetail | undefined>,
 ): Entry[] {
   const out: Entry[] = []
   for (const item of items) {
+    if (isModelGroupItem(item)) {
+      const ref = modelGroupRefOf(item)
+      const mkey = modelGroupKey(ref)
+      const expanded = modelGroupDetails.has(mkey)
+      const detail = modelGroupDetails.get(mkey)
+      out.push({
+        type: 'modelgroup',
+        key: mkey,
+        asset: item,
+        ref,
+        variantCount: item.frameCount,
+        expanded,
+        loading: expanded && !detail,
+      })
+      if (expanded && detail) {
+        for (const v of detail.variants)
+          out.push({ type: 'variant', key: `v:${v.id}`, asset: v, ref, depth: 1 })
+      }
+      continue
+    }
     if (!isGroupItem(item)) {
       out.push({ type: 'asset', key: `a:${item.id}`, asset: item })
       continue

@@ -8,7 +8,7 @@ import {
   Stack,
   X,
 } from '@phosphor-icons/react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Source } from '../api/types'
 import { ACCENT } from '../theme'
@@ -47,6 +47,7 @@ export function Sidebar({
   const baseActive = activeKind === null && !folderActive
   const kindCount: Record<DisplayKind, number | undefined> = {
     image: counts.image,
+    animation: counts.animation,
     model: counts.model,
     audio: counts.audio,
     video: undefined, // нет серверного kind для видео — счётчик не показываем
@@ -141,6 +142,7 @@ function NavRow({
   onClick,
   leftPad = 10,
   caret,
+  rowRef,
 }: {
   label: string
   icon: ReactNode
@@ -149,10 +151,12 @@ function NavRow({
   onClick: () => void
   leftPad?: number
   caret?: ReactNode
+  rowRef?: React.Ref<HTMLDivElement>
 }) {
   const { hovered, bind } = useHover()
   return (
     <div
+      ref={rowRef}
       onClick={onClick}
       {...bind}
       style={{
@@ -336,9 +340,26 @@ function FolderNode({
   activeDir: string
   onSelectDir: (dir: string) => void
 }) {
-  const [expanded, setExpanded] = useState(() => activeDir === path || activeDir.startsWith(path + '/'))
+  // узел лежит на пути к активной папке (сам активен или является её предком)
+  const onActivePath = activeDir === path || activeDir.startsWith(path + '/')
+  const [expanded, setExpanded] = useState(onActivePath)
   const active = activeDir === path
   const leftPad = 10 + depth * 16
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  // при переходе в папку (карточки папок, «перейти к папке» из деталей/лайтбокса)
+  // разворачиваем путь до неё; при уходе не сворачиваем — оставляем дерево как есть.
+  // подстройка состояния во время рендера, а не в эффекте (так советует React)
+  const [wasOnPath, setWasOnPath] = useState(onActivePath)
+  if (onActivePath !== wasOnPath) {
+    setWasOnPath(onActivePath)
+    if (onActivePath) setExpanded(true)
+  }
+
+  // подтягиваем активную папку в зону видимости сайдбара
+  useEffect(() => {
+    if (active) rowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [active])
 
   const caret = (
     <span
@@ -376,6 +397,7 @@ function FolderNode({
         onClick={() => onSelectDir(path)}
         leftPad={leftPad}
         caret={caret}
+        rowRef={rowRef}
       />
       {expanded && hasChildren && (
         <FolderLevel

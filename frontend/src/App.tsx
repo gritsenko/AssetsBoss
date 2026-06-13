@@ -1,6 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Cube,
+  FilmReel,
   FilmStrip,
   FolderPlus,
   GearSix,
@@ -8,11 +9,19 @@ import {
   Moon,
   Rows,
   Stack,
+  TreeStructure,
   Waveform,
 } from '@phosphor-icons/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api/client'
-import type { AnimGroupDetail, Asset, AssetQueryParams, GroupRef } from './api/types'
+import type {
+  AnimGroupDetail,
+  Asset,
+  AssetQueryParams,
+  GroupRef,
+  ModelGroupDetail,
+  ModelGroupRef,
+} from './api/types'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
 import { DetailPanel } from './components/DetailPanel'
 import { FilterChips } from './components/FilterChips'
@@ -50,20 +59,45 @@ export default function App() {
   const [showExt, setShowExt] = usePersistedState('assetboss-showext', true)
   const [panelOpen, setPanelOpen] = usePersistedState('assetboss-panel', true)
   const [groupAnims, setGroupAnims] = usePersistedState('assetboss-groupanims', true)
+  // включать ли ассеты из подпапок; off — только прямое содержимое выбранной папки
+  const [recursive, setRecursive] = usePersistedState('assetboss-recursive', true)
 
-  // компактная сетка: ниже порога подписи скрываются; тоггл в тулбаре прыгает
-  // между компактным размером и последним «обычным»
-  const compact = thumbMin < COMPACT_THRESHOLD
+  // Три взаимоисключающих режима выдачи: icons | grid | list. icons и grid — одна
+  // и та же сетка миниатюр, разница лишь в подписях и регулируется зумом: ниже
+  // порога — режим иконок (без подписей), на/выше — обычная плитка.
+  const compact = view === 'icons'
   const lastRegularThumb = useRef(216)
-  const toggleCompact = useCallback(() => {
-    setThumbMin((prev) => {
-      if (prev < COMPACT_THRESHOLD) {
-        return lastRegularThumb.current >= COMPACT_THRESHOLD ? lastRegularThumb.current : 216
+
+  // Переключение режима кнопками тулбара. Держим зум согласованным с режимом:
+  // в icons опускаем миниатюры под порог, в grid — поднимаем к последнему «обычному».
+  const changeView = useCallback(
+    (next: ViewMode) => {
+      if (next === view) return
+      if (next === 'icons') {
+        if (thumbMin >= COMPACT_THRESHOLD) lastRegularThumb.current = thumbMin
+        setThumbMin(COMPACT_SIZE)
+      } else if (next === 'grid' && thumbMin < COMPACT_THRESHOLD) {
+        setThumbMin(lastRegularThumb.current >= COMPACT_THRESHOLD ? lastRegularThumb.current : 216)
       }
-      lastRegularThumb.current = prev
-      return COMPACT_SIZE
-    })
-  }, [setThumbMin])
+      setView(next)
+    },
+    [view, thumbMin, setView, setThumbMin],
+  )
+
+  // Зум-слайдер сам переключает icons↔grid при переходе через порог (в list зум скрыт).
+  const handleThumbMin = useCallback(
+    (value: number) => {
+      setThumbMin(value)
+      setView((v) => (v === 'list' ? v : value < COMPACT_THRESHOLD ? 'icons' : 'grid'))
+    },
+    [setThumbMin, setView],
+  )
+
+  // На старте сверяем режим иконок/плитки с сохранённым зумом (миграция старого стейта).
+  useEffect(() => {
+    setView((v) => (v === 'list' ? v : thumbMin < COMPACT_THRESHOLD ? 'icons' : 'grid'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // фильтры / навигация
   const [activeSourceId, setActiveSourceId] = useState<number | undefined>(undefined)
@@ -83,6 +117,8 @@ export default function App() {
   // раскрытые группы анимаций (ключ → адрес группы) и клипы
   const [expandedGroups, setExpandedGroups] = useState<Map<string, GroupRef>>(() => new Map())
   const [expandedClips, setExpandedClips] = useState<Set<string>>(() => new Set())
+  // раскрытые группы 3D-моделей (ключ → адрес группы)
+  const [expandedModelGroups, setExpandedModelGroups] = useState<Map<string, ModelGroupRef>>(() => new Map())
 
   const columnsRef = useRef(1)
 
@@ -91,18 +127,21 @@ export default function App() {
   const counts = useKindCounts(activeSourceId)
 
   const serverKind = kind ? KIND_META[kind].serverKind : null
+  const serverAnimated = kind ? KIND_META[kind].serverAnimated : undefined
   const clientFilter = kind ? KIND_META[kind].clientFilter : undefined
 
   const params: AssetQueryParams = useMemo(
     () => ({
       sourceId: activeSourceId,
       dir: activeSourceId !== undefined ? dir : undefined,
-      recursive: true,
+      // off — только прямое содержимое выбранной папки, без обхода подпапок
+      recursive,
       kind: serverKind ?? undefined,
+      animated: serverAnimated || undefined,
       q: debouncedSearch || undefined,
       grouped: groupAnims,
     }),
-    [activeSourceId, dir, serverKind, debouncedSearch, groupAnims],
+    [activeSourceId, dir, recursive, serverKind, serverAnimated, debouncedSearch, groupAnims],
   )
 
   const assetsQuery = useAssets(params)
@@ -129,9 +168,24 @@ export default function App() {
     },
   })
 
+  // детали раскрытых групп моделей (варианты-форматы)
+  const modelGroupRefs = useMemo(() => [...expandedModelGroups.entries()], [expandedModelGroups])
+  const modelGroupDetails = useQueries({
+    queries: modelGroupRefs.map(([, ref]) => ({
+      queryKey: ['modelGroup', ref.sourceId, ref.dir, ref.name],
+      queryFn: () => api.getModelGroup(ref),
+      staleTime: 5 * 60_000,
+    })),
+    combine: (results) => {
+      const m = new Map<string, ModelGroupDetail | undefined>()
+      modelGroupRefs.forEach(([key], i) => m.set(key, results[i]?.data))
+      return m
+    },
+  })
+
   const entries = useMemo(
-    () => buildEntries(items, groupDetails, expandedClips),
-    [items, groupDetails, expandedClips],
+    () => buildEntries(items, groupDetails, expandedClips, modelGroupDetails),
+    [items, groupDetails, expandedClips, modelGroupDetails],
   )
   // раскрытия добавляют строки поверх серверного total (дети есть только у загруженных страниц)
   const displayTotal = total + entries.length - items.length
@@ -191,7 +245,7 @@ export default function App() {
     [selectOnly],
   )
 
-  /** Раскрытие группы до клипов / клипа до кадров (Unity-style, на месте). */
+  /** Раскрытие группы до клипов / клипа до кадров / группы моделей до форматов (на месте). */
   const toggleExpand = useCallback((entry: Entry) => {
     if (entry.type === 'group') {
       setExpandedGroups((prev) => {
@@ -207,6 +261,13 @@ export default function App() {
         else next.add(entry.key)
         return next
       })
+    } else if (entry.type === 'modelgroup') {
+      setExpandedModelGroups((prev) => {
+        const next = new Map(prev)
+        if (next.has(entry.key)) next.delete(entry.key)
+        else next.set(entry.key, entry.ref)
+        return next
+      })
     }
   }, [])
 
@@ -214,6 +275,7 @@ export default function App() {
     setGroupAnims((g) => !g)
     setExpandedGroups(new Map())
     setExpandedClips(new Set())
+    setExpandedModelGroups(new Map())
     clearSelection()
   }, [setGroupAnims, clearSelection])
 
@@ -356,7 +418,7 @@ export default function App() {
       const keys = entries.map((x) => x.key)
       if (['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) {
         e.preventDefault()
-        const cols = view === 'grid' ? Math.max(1, columnsRef.current) : 1
+        const cols = view !== 'list' ? Math.max(1, columnsRef.current) : 1
         const cur = keys.indexOf(primaryKey ?? '')
         let next = cur
         if (cur === -1) next = 0
@@ -415,6 +477,7 @@ export default function App() {
     () => [
       { id: 'all', icon: <Stack size={16} />, label: 'Go to All assets', hint: 'view', run: () => selectKind(null) },
       { id: 'img', icon: <ImageIcon size={16} />, label: 'Show images', hint: 'filter', run: () => selectKind('image') },
+      { id: 'anim-filter', icon: <FilmReel size={16} />, label: 'Show animations', hint: 'filter', run: () => selectKind('animation') },
       { id: 'vid', icon: <FilmStrip size={16} />, label: 'Show video', hint: 'filter', run: () => selectKind('video') },
       { id: 'mdl', icon: <Cube size={16} />, label: 'Show 3D models', hint: 'filter', run: () => selectKind('model') },
       { id: 'aud', icon: <Waveform size={16} />, label: 'Show audio', hint: 'filter', run: () => selectKind('audio') },
@@ -430,13 +493,21 @@ export default function App() {
         icon: <Rows size={16} />,
         label: 'Toggle list view',
         hint: 'view',
-        run: () => setView((v) => (v === 'grid' ? 'list' : 'grid')),
+        run: () =>
+          changeView(view === 'list' ? (thumbMin < COMPACT_THRESHOLD ? 'icons' : 'grid') : 'list'),
+      },
+      {
+        id: 'recursive',
+        icon: <TreeStructure size={16} />,
+        label: 'Toggle including subfolders',
+        hint: 'view',
+        run: () => setRecursive((r) => !r),
       },
       { id: 'theme', icon: <Moon size={16} />, label: 'Toggle dark theme', hint: 'view', run: toggleTheme },
       { id: 'settings', icon: <GearSix size={16} />, label: 'Open settings', hint: 'action', run: () => setSettingsOpen(true) },
       { id: 'add', icon: <FolderPlus size={16} />, label: 'Add folder…', hint: 'action', run: () => setSettingsOpen(true) },
     ],
-    [selectKind, setView, toggleTheme, toggleGroupAnims],
+    [selectKind, changeView, view, thumbMin, setRecursive, toggleTheme, toggleGroupAnims],
   )
 
   return (
@@ -481,11 +552,11 @@ export default function App() {
             query={query}
             onQueryChange={setQuery}
             view={view}
-            onViewChange={setView}
-            compact={compact}
-            onToggleCompact={toggleCompact}
+            onViewChange={changeView}
             groupAnims={groupAnims}
             onToggleGroupAnims={toggleGroupAnims}
+            recursive={recursive}
+            onToggleRecursive={() => setRecursive((r) => !r)}
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen((o) => !o)}
           />
@@ -529,7 +600,7 @@ export default function App() {
             leftText={leftText}
             view={view}
             thumbMin={thumbMin}
-            onThumbMin={setThumbMin}
+            onThumbMin={handleThumbMin}
             sourcePath={sourcePath}
           />
         </div>
@@ -581,7 +652,7 @@ export default function App() {
         dark={dark}
         setDark={setDark}
         thumbMin={thumbMin}
-        setThumbMin={setThumbMin}
+        setThumbMin={handleThumbMin}
         showExt={showExt}
         setShowExt={setShowExt}
         sources={sources}

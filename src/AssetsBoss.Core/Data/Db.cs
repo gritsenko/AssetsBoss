@@ -67,6 +67,7 @@ public sealed class Db
     [
         LoadEmbedded("Schema.sql"),
         LoadEmbedded("Migration2.sql"),
+        LoadEmbedded("Migration3.sql"),
     ];
 
     private static string LoadEmbedded(string name)

@@ -66,11 +66,28 @@ public sealed class LocalFolderProvider : IAssetProvider
 
     public string? GetLocalPath(SourceConfig src, string relPath)
     {
+        // rooted/UNC/drive-qual' или ADS-двоеточие: Path.Combine выкинул бы корень, а ':' открыл бы
+        // альтернативный поток — режем такой ввод сразу (legit relPath от индексатора их не содержит)
+        if (string.IsNullOrEmpty(relPath) || Path.IsPathRooted(relPath) || relPath.Contains(':'))
+            return null;
+
         var root = Path.GetFullPath(src.Root);
-        var full = Path.GetFullPath(Path.Combine(root, relPath.Replace('/', Path.DirectorySeparatorChar)));
-        // защита от path traversal: итоговый путь обязан остаться под корнем источника
-        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return null;
-        return File.Exists(full) ? full : null;
+        var rootWithSep = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
+        var full = Path.GetFullPath(Path.Combine(rootWithSep, relPath.Replace('/', Path.DirectorySeparatorChar)));
+
+        // защита от path traversal: итоговый путь строго под корнем (граница по разделителю —
+        // иначе sibling-папка с тем же префиксом имени, "assets" vs "assets-secret", проходила бы)
+        if (!string.Equals(full, root, StringComparison.OrdinalIgnoreCase)
+            && !full.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        if (!File.Exists(full)) return null;
+
+        // не отдаём reparse-points (symlink/junction): путь к линку под корнем, но цель — вне его.
+        // зеркалит политику индексатора (AttributesToSkip = ReparsePoint).
+        if ((File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0) return null;
+
+        return full;
     }
 
     public IDisposable? Watch(SourceConfig src, Action onAnyChange)

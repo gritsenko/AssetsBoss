@@ -3,6 +3,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Data\Schema.sql" />
     <EmbeddedResource Include="Data\Migration2.sql" />
+    <EmbeddedResource Include="Data\Migration3.sql" />
   </ItemGroup>
 
   <ItemGroup>

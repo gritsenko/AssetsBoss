@@ -64,6 +64,21 @@ export interface GroupRef {
   name: string
 }
 
+/** Адрес группы 3D-моделей: источник + папка + basename (имя без расширения). */
+export interface ModelGroupRef {
+  sourceId: number
+  dir: string
+  name: string
+}
+
+/** Состав группы 3D-моделей: варианты одного имени в разных форматах (по приоритету). */
+export interface ModelGroupDetail {
+  sourceId: number
+  dir: string
+  name: string
+  variants: Asset[]
+}
+
 export interface DirNode {
   path: string
   name: string
@@ -94,4 +109,6 @@ export interface AssetQueryParams {
   q?: string
   /** Схлопывать анимационные последовательности в одну строку-группу. */
   grouped?: boolean
+  /** Показывать только анимации: секвенции кадров + анимированные одиночки (GIF/WebP/APNG). */
+  animated?: boolean
 }

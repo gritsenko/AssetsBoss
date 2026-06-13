@@ -3,6 +3,7 @@ import type { Asset } from '../api/types'
 import { ACCENT } from '../theme'
 import { useHover } from '../hooks/useHover'
 import { displayName, extLabel, formatSize } from '../lib/format'
+import { rendersAsIcon } from '../lib/kind'
 import { AssetThumb } from './AssetThumb'
 
 interface Props {
@@ -44,6 +45,30 @@ export function AssetCard({ asset, selected, thumbSize, showExt, frameNo, compac
     >
       <div style={{ position: 'relative', aspectRatio: '4 / 3', background: 'var(--well)' }}>
         <AssetThumb asset={asset} size={thumbSize} iconSize={compact ? 22 : 34} />
+        {compact && rendersAsIcon(asset) && (
+          <div
+            title={asset.name}
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              padding: '3px 5px 4px',
+              fontSize: 9.5,
+              fontWeight: 600,
+              lineHeight: 1.15,
+              textAlign: 'center',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              color: 'var(--ink2)',
+              // мягкий скрим из фона ячейки, чтобы подпись читалась поверх иконки
+              background: 'linear-gradient(to top, var(--well) 65%, transparent)',
+            }}
+          >
+            {displayName(asset.name, showExt)}
+          </div>
+        )}
         {!compact && (
           <div
             className="font-mono"

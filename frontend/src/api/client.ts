@@ -5,6 +5,8 @@ import type {
   AssetQueryParams,
   DirNode,
   GroupRef,
+  ModelGroupDetail,
+  ModelGroupRef,
   ScanStatus,
   Source,
 } from './types'
@@ -52,6 +54,7 @@ export const api = {
     if (params.kind) search.set('kind', params.kind)
     if (params.q) search.set('q', params.q)
     if (params.grouped) search.set('grouped', 'true')
+    if (params.animated) search.set('animated', 'true')
     search.set('offset', String(offset))
     search.set('limit', String(limit))
     return http<AssetPage>(`/api/assets?${search}`)
@@ -67,9 +70,50 @@ export const api = {
     })
     return http<AnimGroupDetail>(`/api/assets/group?${search}`)
   },
+
+  getFolderPreview: (sourceId: number, dir: string, limit = 4) =>
+    http<{ items: Asset[]; total: number }>(
+      `/api/assets/folder-preview?sourceId=${sourceId}&dir=${encodeURIComponent(dir)}&limit=${limit}`,
+    ),
+
+  getModelGroup: (ref: ModelGroupRef) => {
+    const search = new URLSearchParams({
+      sourceId: String(ref.sourceId),
+      dir: ref.dir,
+      name: ref.name,
+    })
+    return http<ModelGroupDetail>(`/api/assets/modelgroup?${search}`)
+  },
 }
 
-export const thumbUrl = (asset: Asset, size: 128 | 256 | 512) =>
+export const thumbUrl = (asset: Asset, size: 128 | 256 | 512 | 1024) =>
   `/api/assets/${asset.id}/thumb?size=${size}&v=${asset.mtime}`
 
 export const contentUrl = (asset: Asset) => `/api/assets/${asset.id}/content`
+
+/**
+ * Сырой файл по относительному пути внутри источника. Сегменты кодируются, но '/'
+ * сохраняются — так 3D-загрузчики (glTF/OBJ) разрешают соседние .bin/.mtl/текстуры
+ * относительно URL модели.
+ */
+export const rawUrl = (sourceId: number, relPath: string) =>
+  `/api/sources/${sourceId}/raw/${relPath.split('/').map(encodeURIComponent).join('/')}`
+
+/** URL модели для WebGL-загрузчиков (резолвит соседние ресурсы). */
+export const modelUrl = (asset: Asset) => rawUrl(asset.sourceId, asset.relPath)
+
+/**
+ * Версия клиентского рендера 3D-превью. Меняем при правках рендера (свет/камера/материалы) —
+ * новый rev даёт новый ключ кэша на бэке, старые превью инвалидируются сами.
+ */
+export const MODEL_THUMB_REV = 1
+/** Канонический размер мастер-превью; меньшие размеры сервер ужимает из него. */
+export const MODEL_THUMB_MASTER = 512
+
+/** URL превью модели для сетки (сервер отдаёт из кэша или ужимает из мастера). */
+export const modelThumbUrl = (asset: Asset, size: number) =>
+  `/api/assets/${asset.id}/thumb?size=${size}&v=${asset.mtime}&rev=${MODEL_THUMB_REV}`
+
+/** Куда клиент заливает мастер-превью (один рендер обслуживает все размеры). */
+export const modelThumbUploadUrl = (asset: Asset) =>
+  `/api/assets/${asset.id}/thumb?size=${MODEL_THUMB_MASTER}&rev=${MODEL_THUMB_REV}`

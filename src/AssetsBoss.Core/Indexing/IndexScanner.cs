@@ -67,6 +67,7 @@ public sealed class IndexScanner(Db db)
         SyncDirs(conn, src.Id, allDirs);
 
         AnimationIndexer.Recompute(conn, src.Id);
+        await AnimatedImageIndexer.RecomputeAsync(conn, src, provider, ct);
 
         conn.Execute("UPDATE sources SET last_scan_at = @now WHERE id = @id",
             new { id = src.Id, now = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
@@ -137,8 +138,10 @@ public sealed class IndexScanner(Db db)
         using var tx = conn.BeginTransaction();
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        // width/height сбрасываются: файл изменился, размеры пересчитает миниатюра
-        cmd.CommandText = "UPDATE assets SET size = @size, mtime = @mtime, width = NULL, height = NULL WHERE id = @id";
+        // width/height и is_animated сбрасываются: содержимое изменилось — миниатюра
+        // пересчитает размеры, пост-проход заново определит анимированность
+        cmd.CommandText =
+            "UPDATE assets SET size = @size, mtime = @mtime, width = NULL, height = NULL, is_animated = NULL WHERE id = @id";
         var pId = cmd.Parameters.Add("@id", SqliteType.Integer);
         var pSize = cmd.Parameters.Add("@size", SqliteType.Integer);
         var pMtime = cmd.Parameters.Add("@mtime", SqliteType.Integer);
