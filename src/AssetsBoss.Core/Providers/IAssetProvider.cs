@@ -24,6 +24,13 @@ public interface IAssetProvider
 
     Task<Stream> OpenReadAsync(SourceConfig src, string relPath, CancellationToken ct);
 
+    /// <summary>
+    /// Лёгкий источник для генерации миниатюры (например, бэкендное превью удалённого хранилища),
+    /// чтобы не качать тяжёлый оригинал. <c>null</c> — провайдер не умеет или превью нет; тогда
+    /// миниатюра строится из <see cref="OpenReadAsync"/>.
+    /// </summary>
+    Task<Stream?> OpenThumbnailSourceAsync(SourceConfig src, string relPath, CancellationToken ct);
+
     /// <summary>Физический путь файла, если есть Caps.LocalPath; иначе null.</summary>
     string? GetLocalPath(SourceConfig src, string relPath);
 

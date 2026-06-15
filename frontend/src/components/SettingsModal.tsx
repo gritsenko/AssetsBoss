@@ -1,9 +1,11 @@
-import { Cloud, FolderSimple, Plus, X } from '@phosphor-icons/react'
+import { FolderSimple, X } from '@phosphor-icons/react'
 import { useState } from 'react'
 import type { Source } from '../api/types'
 import { ACCENT } from '../theme'
-import { useHover } from '../hooks/useHover'
 import { IconButton } from './ui'
+import { AddProviderButton, EditableSourceName, RemoveButton, panelInputStyle } from './settingsKit'
+import { providerExtensions } from '../extensions'
+import type { ExtensionContext } from '../extensions/types'
 
 interface Props {
   open: boolean
@@ -17,6 +19,8 @@ interface Props {
   sources: Source[] | undefined
   addSource: (path: string) => Promise<string | null>
   removeSource: (id: number) => void
+  renameSource: (id: number, name: string) => Promise<string | null>
+  showToast: (message: string) => void
 }
 
 const SIZE_PRESETS: [string, number][] = [
@@ -37,6 +41,8 @@ export function SettingsModal({
   sources,
   addSource,
   removeSource,
+  renameSource,
+  showToast,
 }: Props) {
   const [adding, setAdding] = useState(false)
   const [path, setPath] = useState('')
@@ -44,6 +50,11 @@ export function SettingsModal({
   const [busy, setBusy] = useState(false)
 
   if (!open) return null
+
+  // Локальные папки; источники сторонних провайдеров рисуют их собственные секции-расширения.
+  const folders = sources?.filter((s) => s.scheme === 'local')
+
+  const extCtx: ExtensionContext = { sources, removeSource, renameSource, showToast }
 
   const submitFolder = async () => {
     const trimmed = path.trim()
@@ -116,7 +127,7 @@ export function SettingsModal({
         <div style={{ padding: '12px 0 4px' }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 8 }}>Watched folders</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {sources?.map((src) => (
+            {folders?.map((src) => (
               <div
                 key={src.id}
                 style={{
@@ -130,20 +141,7 @@ export function SettingsModal({
                 }}
               >
                 <FolderSimple size={15} color="var(--faint)" />
-                <span
-                  className="font-mono"
-                  style={{
-                    flex: 1,
-                    fontSize: 11,
-                    color: 'var(--ink2)',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title={src.root}
-                >
-                  {src.root}
-                </span>
+                <EditableSourceName source={src} onRename={renameSource} />
                 <RemoveButton onClick={() => removeSource(src.id)} />
               </div>
             ))}
@@ -163,21 +161,15 @@ export function SettingsModal({
                   }}
                   placeholder="C:\Path\To\Assets"
                   className="font-mono"
-                  style={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--line2)',
-                    borderRadius: 8,
-                    padding: '8px 10px',
-                    fontSize: 11,
-                    color: 'var(--ink)',
-                  }}
+                  style={panelInputStyle}
                 />
                 {error && <span style={{ fontSize: 11, color: 'var(--danger)' }}>{error}</span>}
               </div>
             )}
 
-            <AddFolderButton
+            <AddProviderButton
               busy={busy}
+              label="Add folder"
               onClick={() => {
                 if (adding) submitFolder()
                 else setAdding(true)
@@ -186,32 +178,11 @@ export function SettingsModal({
           </div>
         </div>
 
-        <div
-          style={{
-            marginTop: 14,
-            paddingTop: 14,
-            borderTop: '1px solid var(--line)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          <Cloud size={16} weight="bold" color="var(--line3)" />
-          <div style={{ flex: 1, fontSize: 12, color: 'var(--muted)' }}>Cloud &amp; media-storage providers</div>
-          <span
-            className="font-mono"
-            style={{
-              fontSize: 9.5,
-              letterSpacing: '0.08em',
-              color: 'var(--faint)',
-              border: '1px solid var(--line2)',
-              borderRadius: 999,
-              padding: '3px 9px',
-            }}
-          >
-            COMING SOON
-          </span>
-        </div>
+        {providerExtensions.map((ext) => (
+          <div key={ext.id} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+            <ext.SettingsSection ctx={extCtx} />
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -309,58 +280,6 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
           transition: 'left 0.18s ease',
         }}
       />
-    </button>
-  )
-}
-
-function RemoveButton({ onClick }: { onClick: () => void }) {
-  const { hovered, bind } = useHover()
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      {...bind}
-      title="Remove from index"
-      style={{
-        border: 'none',
-        background: 'transparent',
-        cursor: 'pointer',
-        color: hovered ? 'var(--danger)' : 'var(--faint)',
-        display: 'flex',
-        padding: 2,
-      }}
-    >
-      <X size={12} weight="bold" />
-    </button>
-  )
-}
-
-function AddFolderButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
-  const { hovered, bind } = useHover()
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      {...bind}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 7,
-        border: `1px dashed ${hovered ? ACCENT : 'var(--line3)'}`,
-        background: 'transparent',
-        borderRadius: 8,
-        padding: '9px 0',
-        cursor: busy ? 'default' : 'pointer',
-        fontSize: 12.5,
-        fontWeight: 600,
-        color: hovered ? ACCENT : 'var(--muted)',
-        opacity: busy ? 0.6 : 1,
-      }}
-    >
-      <Plus size={13} weight="bold" />
-      {busy ? 'Adding…' : 'Add folder'}
     </button>
   )
 }

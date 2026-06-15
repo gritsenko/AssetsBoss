@@ -55,6 +55,8 @@ public static class ServerHost
 
         builder.Services.AddOpenApi();
 
+        var plugins = PluginLoader.Discover();
+
         builder.Services.AddSingleton(new Db(AppPaths.DbFile));
         builder.Services.AddSingleton<SourceRepository>();
         builder.Services.AddSingleton<AssetRepository>();
@@ -68,6 +70,9 @@ public static class ServerHost
             sp.GetRequiredService<AssetRepository>(),
             sp.GetRequiredService<ILogger<ThumbnailService>>()));
 
+        foreach (var plugin in plugins)
+            plugin.ConfigureServices(builder.Services);
+
         var app = builder.Build();
 
         app.Services.GetRequiredService<Db>().Migrate();
@@ -77,6 +82,9 @@ public static class ServerHost
         api.MapSourcesApi();
         api.MapScanApi();
         api.MapAssetsApi();
+
+        foreach (var plugin in plugins)
+            plugin.MapEndpoints(api);
 
         if (app.Environment.IsDevelopment())
         {

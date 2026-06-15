@@ -64,6 +64,10 @@ public sealed class LocalFolderProvider : IAssetProvider
         return Task.FromResult<Stream>(File.OpenRead(path));
     }
 
+    // Локальные файлы дешевле декодировать напрямую — отдельного источника превью нет.
+    public Task<Stream?> OpenThumbnailSourceAsync(SourceConfig src, string relPath, CancellationToken ct) =>
+        Task.FromResult<Stream?>(null);
+
     public string? GetLocalPath(SourceConfig src, string relPath)
     {
         // rooted/UNC/drive-qual' или ADS-двоеточие: Path.Combine выкинул бы корень, а ':' открыл бы

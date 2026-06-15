@@ -33,4 +33,18 @@
     </ItemGroup>
   </Target>
 
+  <!-- Отладка Desktop (Debug): обычная сборка не запускает BuildFrontend (тот только для publish),
+       поэтому кладём уже собранный фронтенд (frontend\dist) рядом с бинарником как wwwroot —
+       иначе Photino грузит '/' и получает 404 (белое окно). Нужен предварительный `npm run build`
+       в frontend; если dist нет — таргет тихо пропускается. На publish (Release) не влияет. -->
+  <Target Name="StageFrontendForDebug" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Debug' And Exists('$(FrontendDir)\dist')">
+    <ItemGroup>
+      <DebugFrontendDist Include="$(FrontendDir)\dist\**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DebugFrontendDist)"
+          DestinationFiles="@(DebugFrontendDist->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

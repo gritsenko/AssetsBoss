@@ -71,6 +71,13 @@ input::placeholder {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes ab-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+@keyframes ab-spin {
+  to { transform: rotate(360deg); }
+}
 
 .ab-fade { animation: ab-fade 0.16s ease both; }
 .ab-slidein { animation: ab-slidein 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
@@ -78,5 +85,7 @@ input::placeholder {
 .ab-palette { animation: ab-palette 0.16s ease both; }
 .ab-modal { animation: ab-modal 0.16s ease both; }
 .ab-fadeup { animation: ab-fadeup 0.18s ease both; }
+.ab-pulse { animation: ab-pulse 1.1s ease-in-out infinite; }
+.ab-spin { animation: ab-spin 0.9s linear infinite; }
 
 .ab-press:active { transform: scale(0.98); }

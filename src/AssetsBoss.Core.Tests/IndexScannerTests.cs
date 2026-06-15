@@ -143,6 +143,9 @@ public class IndexScannerTests : IDisposable
         public Task<Stream> OpenReadAsync(SourceConfig src, string relPath, CancellationToken ct) =>
             throw new NotSupportedException();
 
+        public Task<Stream?> OpenThumbnailSourceAsync(SourceConfig src, string relPath, CancellationToken ct) =>
+            Task.FromResult<Stream?>(null);
+
         public string? GetLocalPath(SourceConfig src, string relPath) => null;
         public IDisposable? Watch(SourceConfig src, Action onAnyChange) => null;
     }

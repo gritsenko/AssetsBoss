@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AssetsBoss.Core\AssetsBoss.Core.csproj" />
+    <ProjectReference Include="..\AssetsBoss.Plugins.Abstractions\AssetsBoss.Plugins.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

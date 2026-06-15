@@ -27,3 +27,16 @@ createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </StrictMode>,
 )
+
+// Убираем загрузочный сплеш из index.html, как только React отрисовал оболочку.
+// Двойной requestAnimationFrame гарантирует, что первый кадр уже на экране, —
+// иначе между исчезновением сплеша и появлением UI мелькнул бы пустой фон.
+function hideBootSplash() {
+  const el = document.getElementById('boot-splash')
+  if (!el) return
+  el.classList.add('boot-hide')
+  el.addEventListener('transitionend', () => el.remove(), { once: true })
+  // запасной таймер на случай, если transitionend не сработает (reduced-motion и т.п.)
+  setTimeout(() => el.remove(), 600)
+}
+requestAnimationFrame(() => requestAnimationFrame(hideBootSplash))

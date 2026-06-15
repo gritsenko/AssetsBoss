@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Публичный контракт провайдер-плагинов. Не содержит никакой провайдер-специфики.
+    Плагин (внешняя сборка AssetsBoss.Provider.*) реализует IProviderPlugin и грузится
+    хостом в рантайме (см. PluginLoader). FrameworkReference нужен ради IEndpointRouteBuilder
+    и IServiceCollection в сигнатурах контракта.
+  -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

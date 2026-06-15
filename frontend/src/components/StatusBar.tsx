@@ -4,13 +4,14 @@ import type { ViewMode } from './Toolbar'
 
 interface Props {
   leftText: string
+  indexing?: boolean
   view: ViewMode
   thumbMin: number
   onThumbMin: (value: number) => void
   sourcePath: string
 }
 
-export function StatusBar({ leftText, view, thumbMin, onThumbMin, sourcePath }: Props) {
+export function StatusBar({ leftText, indexing = false, view, thumbMin, onThumbMin, sourcePath }: Props) {
   return (
     <div
       className="font-mono"
@@ -26,7 +27,32 @@ export function StatusBar({ leftText, view, thumbMin, onThumbMin, sourcePath }: 
         color: 'var(--faint)',
       }}
     >
-      <span>{leftText}</span>
+      <span
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          minWidth: 0,
+          maxWidth: '55%',
+          color: indexing ? ACCENT : undefined,
+        }}
+      >
+        {indexing && (
+          <span
+            className="ab-pulse"
+            style={{
+              flex: '0 0 auto',
+              width: 7,
+              height: 7,
+              borderRadius: '50%',
+              background: ACCENT,
+            }}
+          />
+        )}
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {leftText}
+        </span>
+      </span>
       <span style={{ flex: 1 }} />
       {view !== 'list' && (
         <>

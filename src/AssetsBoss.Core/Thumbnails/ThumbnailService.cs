@@ -168,10 +168,14 @@ public sealed class ThumbnailService
         {
             if (File.Exists(path)) return new ThumbResult(path, key); // другой запрос успел
 
-            await using var input = await provider.OpenReadAsync(src, asset.RelPath, ct);
-            using var image = await DecodeAsync(asset.Ext, input, ct);
+            // Тяжёлый оригинал ради миниатюры не качаем: если провайдер отдаёт лёгкое превью
+            // (бэкендный растр удалённого хранилища) — декодируем его (формат определяется по содержимому,
+            // PSD там не бывает); иначе берём оригинал нашим ридером (включая PSD).
+            var (image, fromOriginal) = await LoadThumbnailSourceAsync(asset, src, provider, ct);
+            using var _ = image;
 
-            if (asset.Width is null)
+            // размеры пишем только из оригинала: превью бэкенда может быть ужато и дало бы неверное разрешение
+            if (fromOriginal && asset.Width is null)
                 _assets.SetDimensions(asset.Id, image.Width, image.Height);
 
             Downscale(image, size);
@@ -188,6 +192,25 @@ public sealed class ThumbnailService
         {
             _throttle.Release();
         }
+    }
+
+    /// <summary>
+    /// Источник пикселей для миниатюры: бэкендное превью провайдера (если есть) либо оригинал.
+    /// Превью — готовый растр, его читаем штатным декодером; оригинал может быть PSD — тогда наш ридер.
+    /// <c>FromOriginal</c> = декодировали оригинал (можно доверять его размерам).
+    /// </summary>
+    private static async Task<(Image Image, bool FromOriginal)> LoadThumbnailSourceAsync(
+        Asset asset, SourceConfig src, IAssetProvider provider, CancellationToken ct)
+    {
+        var preview = await provider.OpenThumbnailSourceAsync(src, asset.RelPath, ct);
+        if (preview is not null)
+        {
+            await using (preview)
+                return (await Image.LoadAsync(preview, ct), false);
+        }
+
+        await using var input = await provider.OpenReadAsync(src, asset.RelPath, ct);
+        return (await DecodeAsync(asset.Ext, input, ct), true);
     }
 
     /// <summary>

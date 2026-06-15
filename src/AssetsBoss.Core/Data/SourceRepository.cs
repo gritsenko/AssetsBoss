@@ -27,17 +27,24 @@ public sealed class SourceRepository(Db db)
             """, new { id });
     }
 
-    public SourceConfig Add(string name, string scheme, string root)
+    public SourceConfig Add(string name, string scheme, string root, string? configJson = null)
     {
         using var conn = db.Open();
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var id = conn.ExecuteScalar<long>(
             """
-            INSERT INTO sources(name, scheme, root, created_at)
-            VALUES (@name, @scheme, @root, @now);
+            INSERT INTO sources(name, scheme, root, config_json, created_at)
+            VALUES (@name, @scheme, @root, @configJson, @now);
             SELECT last_insert_rowid();
-            """, new { name, scheme, root, now });
-        return new SourceConfig(id, name, scheme, root, null, now, null);
+            """, new { name, scheme, root, configJson, now });
+        return new SourceConfig(id, name, scheme, root, configJson, now, null);
+    }
+
+    /// <summary>Переименовывает источник (отображаемое имя в сайдбаре/настройках). false — источника нет.</summary>
+    public bool Rename(long id, string name)
+    {
+        using var conn = db.Open();
+        return conn.Execute("UPDATE sources SET name = @name WHERE id = @id", new { id, name }) > 0;
     }
 
     public bool Delete(long id)

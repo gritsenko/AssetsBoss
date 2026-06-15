@@ -488,3 +488,11 @@ frontend/dist/
 # Publish output
 publish/
 
+# Local-only NuGet config (private package feeds used when building local provider plugins)
+NuGet.config
+
+# Private provider-plugin modules dropped into the frontend extension seam
+# (the seam directory keeps its own .gitignore; this is a belt-and-suspenders guard)
+frontend/src/extensions/private/*
+!frontend/src/extensions/private/.gitignore
+

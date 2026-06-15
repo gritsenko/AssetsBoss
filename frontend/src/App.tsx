@@ -365,6 +365,25 @@ export default function App() {
     },
   })
 
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => api.renameSource(id, name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sources'] })
+    },
+  })
+  const renameSource = useCallback(
+    async (id: number, name: string): Promise<string | null> => {
+      try {
+        await renameMutation.mutateAsync({ id, name })
+        showToast('Source renamed')
+        return null
+      } catch (e) {
+        return (e as Error).message
+      }
+    },
+    [renameMutation, showToast],
+  )
+
   const scanMutation = useMutation({
     mutationFn: api.triggerScan,
     onSuccess: () => {
@@ -457,8 +476,20 @@ export default function App() {
       (activeSourceId === undefined || s.sourceId === activeSourceId),
   )
 
+  const scanningSourceIds = useMemo(
+    () =>
+      new Set(
+        scanStatuses
+          ?.filter((s) => s.state === 'running' || s.state === 'queued')
+          .map((s) => s.sourceId),
+      ),
+    [scanStatuses],
+  )
+
   const leftText = scanning
-    ? `Indexing… ${scanning.seen.toLocaleString()} files`
+    ? `Indexing… ${scanning.seen.toLocaleString()} files${
+        scanning.currentDir ? ` · ${scanning.currentDir}` : ''
+      }`
     : selected.size > 1
       ? `${selected.size} selected`
       : counts.all === undefined
@@ -540,6 +571,7 @@ export default function App() {
           counts={counts}
           sources={sources}
           activeSourceId={activeSourceId}
+          scanningSourceIds={scanningSourceIds}
           onSelectSource={selectSource}
           onRescanSource={(id) => scanMutation.mutate(id)}
           onRemoveSource={(id) => deleteMutation.mutate(id)}
@@ -598,6 +630,7 @@ export default function App() {
           />
           <StatusBar
             leftText={leftText}
+            indexing={!!scanning}
             view={view}
             thumbMin={thumbMin}
             onThumbMin={handleThumbMin}
@@ -658,6 +691,8 @@ export default function App() {
         sources={sources}
         addSource={addSource}
         removeSource={(id: number) => deleteMutation.mutate(id)}
+        renameSource={renameSource}
+        showToast={showToast}
       />
     </div>
   )

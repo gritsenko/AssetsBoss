@@ -24,6 +24,8 @@ interface Props {
   counts: KindCounts
   sources: Source[] | undefined
   activeSourceId: number | undefined
+  /** Источники с активной индексацией (queued/running) — показываем спиннер. */
+  scanningSourceIds?: Set<number>
   onSelectSource: (id: number | undefined) => void
   onRescanSource: (id: number) => void
   onRemoveSource: (id: number) => void
@@ -38,6 +40,7 @@ export function Sidebar({
   counts,
   sources,
   activeSourceId,
+  scanningSourceIds,
   onSelectSource,
   onRescanSource,
   onRemoveSource,
@@ -104,6 +107,7 @@ export function Sidebar({
             key={src.id}
             source={src}
             active={activeSourceId === src.id}
+            indexing={scanningSourceIds?.has(src.id) ?? false}
             onClick={() => onSelectSource(src.id)}
             onRescan={() => onRescanSource(src.id)}
             onRemove={() => onRemoveSource(src.id)}
@@ -189,12 +193,14 @@ function NavRow({
 function SourceRow({
   source,
   active,
+  indexing,
   onClick,
   onRescan,
   onRemove,
 }: {
   source: Source
   active: boolean
+  indexing: boolean
   onClick: () => void
   onRescan: () => void
   onRemove: () => void
@@ -222,6 +228,11 @@ function SourceRow({
       <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {source.name}
       </span>
+      {indexing && !hovered && (
+        <span className="ab-spin" style={{ display: 'flex', flex: '0 0 auto', color: ACCENT }} title="Indexing…">
+          <ArrowsClockwise size={13} weight="bold" />
+        </span>
+      )}
       {hovered && (
         <span style={{ display: 'flex', gap: 2, flex: '0 0 auto' }}>
           <MiniButton

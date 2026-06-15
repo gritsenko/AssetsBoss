@@ -5,6 +5,8 @@ namespace AssetsBoss.Server.Api;
 
 public sealed record AddSourceRequest(string Name, string Root);
 
+public sealed record RenameSourceRequest(string Name);
+
 public static class SourcesApi
 {
     public static RouteGroupBuilder MapSourcesApi(this RouteGroupBuilder group)
@@ -29,6 +31,18 @@ public static class SourcesApi
             scans.EnqueueRescan(src.Id);
             watchers.SyncWatchers();
             return Results.Created($"/api/sources/{src.Id}", src);
+        });
+
+        // Переименование источника (любого scheme) — отображаемое имя в сайдбаре/настройках.
+        group.MapPatch("/sources/{id:long}", (long id, RenameSourceRequest req, SourceRepository sources) =>
+        {
+            var name = req.Name?.Trim();
+            if (string.IsNullOrEmpty(name))
+                return Results.BadRequest(new { error = "Имя не может быть пустым" });
+
+            return sources.Rename(id, name)
+                ? Results.Ok(sources.GetById(id))
+                : Results.NotFound();
         });
 
         group.MapDelete("/sources/{id:long}", (

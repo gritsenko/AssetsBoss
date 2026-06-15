@@ -39,6 +39,13 @@ export const api = {
 
   deleteSource: (id: number) => http<void>(`/api/sources/${id}`, { method: 'DELETE' }),
 
+  renameSource: (id: number, name: string) =>
+    http<Source>(`/api/sources/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+
   triggerScan: (id: number) => http<{ queued: boolean }>(`/api/sources/${id}/scan`, { method: 'POST' }),
 
   getScanStatus: () => http<ScanStatus[]>('/api/scan/status'),
