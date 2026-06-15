@@ -14,11 +14,12 @@
 - **release** — Photino-окно открывает `http://127.0.0.1:{случайный порт}`, Kestrel дополнительно отдаёт статику фронтенда из `wwwroot`.
 
 ```
-src/AssetsBoss.Core      домен, IAssetProvider, SQLite-индекс, сканер, миниатюры
-src/AssetsBoss.Server    minimal API (dev-вход + библиотека для Desktop)
-src/AssetsBoss.Desktop   Photino-хост (release)
+src/AssetsBoss.Core                 домен, IAssetProvider, SQLite-индекс, сканер, миниатюры
+src/AssetsBoss.Plugins.Abstractions контракт провайдер-плагинов (IProviderPlugin)
+src/AssetsBoss.Server               minimal API (dev-вход + библиотека для Desktop) + загрузчик плагинов
+src/AssetsBoss.Desktop              Photino-хост (release)
 src/AssetsBoss.Core.Tests
-frontend/                Vite + React + TS + Tailwind
+frontend/                           Vite + React + TS + Tailwind
 ```
 
 Данные в рантайме: `%LOCALAPPDATA%\AssetsBoss\` — `assetsboss.db`, `thumbs\`, `logs\`.
@@ -48,9 +49,10 @@ dotnet publish src/AssetsBoss.Desktop -c Release -r win-x64 --self-contained -o 
 
 ## Расширение
 
-- **Новый провайдер** (облако и т.п.): реализовать `IAssetProvider` и зарегистрировать
-  в DI (`ServerHost.cs`); сканер и API не меняются. Провайдер без `Caps.Watch`
-  ресканится по кнопке.
+- **Новый провайдер** (облако и т.п.): реализовать `IAssetProvider`; сканер и API не меняются,
+  провайдер без `Caps.Watch` ресканится по кнопке. Встроенный провайдер регистрируется в DI
+  (`ServerHost.cs`); внешний поставляется отдельной сборкой через контракт `IProviderPlugin`
+  и подхватывается в рантайме — см. [docs/plugins.md](docs/plugins.md).
 - **3D-превью**: `/api/assets/{id}/content` уже отдаёт байты — добавить three.js-вьюер
   в `DetailPanel`.
 - **Теги**: таблицы `tags`/`asset_tags` уже в схеме, нужен только UI и пара эндпоинтов.
