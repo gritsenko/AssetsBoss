@@ -4,6 +4,8 @@
     <!-- WinExe: без консольного окна -->
     <OutputType>WinExe</OutputType>
     <AssemblyName>AssetsBoss</AssemblyName>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 
   <ItemGroup>

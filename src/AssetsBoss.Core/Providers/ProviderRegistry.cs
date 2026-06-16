@@ -13,4 +13,10 @@ public sealed class ProviderRegistry
         _providers.TryGetValue(scheme, out var p)
             ? p
             : throw new InvalidOperationException($"Unknown provider scheme '{scheme}'");
+
+    public IAssetProvider? TryGet(string scheme) =>
+        _providers.TryGetValue(scheme, out var p) ? p : null;
+
+    public bool IsAvailable(string scheme) =>
+        _providers.ContainsKey(scheme);
 }

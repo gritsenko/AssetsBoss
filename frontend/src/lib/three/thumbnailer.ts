@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { MODEL_THUMB_MASTER, modelThumbUploadUrl, modelUrl } from '../../api/client'
+import { api, MODEL_THUMB_MASTER, modelThumbUploadUrl } from '../../api/client'
 import type { Asset } from '../../api/types'
 import { disposeObject, loadModel } from './loadModel'
 
@@ -66,7 +66,9 @@ export function ensureModelThumb(asset: Asset): Promise<boolean> {
 async function generate(asset: Asset): Promise<boolean> {
   let obj: THREE.Object3D | null = null
   try {
-    obj = await loadModel(modelUrl(asset), asset.ext)
+    // bundle нужен для резолва внешних текстур (TGA, соседние папки); без него — clay
+    const bundle = await api.getModelBundle(asset.id).catch(() => undefined)
+    obj = await loadModel(asset, bundle)
     const blob = await renderToBlob(obj, MODEL_THUMB_MASTER)
     if (!blob) return false // пустой/вырожденный рендер — не кэшируем мусор, покажем иконку
     const res = await fetch(modelThumbUploadUrl(asset), {

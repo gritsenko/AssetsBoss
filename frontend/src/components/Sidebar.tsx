@@ -102,7 +102,7 @@ export function Sidebar({
           active={activeSourceId === undefined}
           onClick={() => onSelectSource(undefined)}
         />
-        {sources?.map((src) => (
+        {sources?.filter((s) => s.available).map((src) => (
           <SourceRow
             key={src.id}
             source={src}
@@ -113,7 +113,7 @@ export function Sidebar({
             onRemove={() => onRemoveSource(src.id)}
           />
         ))}
-        {sources?.length === 0 && (
+        {sources?.filter((s) => s.available).length === 0 && (
           <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--faint)' }}>
             Add a folder to start indexing.
           </div>

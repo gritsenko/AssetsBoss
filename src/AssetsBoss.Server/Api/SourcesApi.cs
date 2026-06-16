@@ -1,5 +1,6 @@
 using AssetsBoss.Core.Data;
 using AssetsBoss.Core.Indexing;
+using AssetsBoss.Core.Providers;
 
 namespace AssetsBoss.Server.Api;
 
@@ -11,7 +12,19 @@ public static class SourcesApi
 {
     public static RouteGroupBuilder MapSourcesApi(this RouteGroupBuilder group)
     {
-        group.MapGet("/sources", (SourceRepository sources) => sources.GetAll());
+        group.MapGet("/sources", (SourceRepository sources, ProviderRegistry registry) =>
+            sources.GetAll().Select(s => new {
+                s.Id, s.Name, s.Scheme, s.Root, s.ConfigJson, s.CreatedAt, s.LastScanAt,
+                Available = registry.IsAvailable(s.Scheme),
+            }));
+
+        group.MapGet("/sources/browse", async (FolderBrowserService picker) =>
+        {
+            if (!picker.IsAvailable)
+                return Results.StatusCode(501);
+            var path = await picker.BrowseAsync();
+            return path is not null ? Results.Ok(new { path }) : Results.NoContent();
+        });
 
         group.MapPost("/sources", (
             AddSourceRequest req, SourceRepository sources,

@@ -8,6 +8,7 @@ export interface Source {
   configJson: string | null
   createdAt: number
   lastScanAt: number | null
+  available: boolean
 }
 
 export interface Asset {
@@ -77,6 +78,22 @@ export interface ModelGroupDetail {
   dir: string
   name: string
   variants: Asset[]
+}
+
+/** Companion-файл модели (текстура или анимационный клип): имя файла + путь в источнике. */
+export interface ModelCompanion {
+  /** Имя файла с расширением (по нему резолвятся текстуры из FBX). */
+  name: string
+  relPath: string
+  /** PBR-слот текстуры (map/normalMap/…), если точно определён из Unity .mat/.meta; иначе null. */
+  slot?: string | null
+}
+
+/** Связанные с моделью файлы: внешние текстуры + внешние анимационные FBX. */
+export interface ModelBundle {
+  sourceId: number
+  textures: ModelCompanion[]
+  animations: ModelCompanion[]
 }
 
 export interface DirNode {

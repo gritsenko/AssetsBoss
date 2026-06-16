@@ -5,6 +5,7 @@ import type {
   AssetQueryParams,
   DirNode,
   GroupRef,
+  ModelBundle,
   ModelGroupDetail,
   ModelGroupRef,
   ScanStatus,
@@ -36,6 +37,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, root }),
     }),
+
+  browseFolder: () => http<{ path: string }>('/api/sources/browse'),
 
   deleteSource: (id: number) => http<void>(`/api/sources/${id}`, { method: 'DELETE' }),
 
@@ -91,6 +94,9 @@ export const api = {
     })
     return http<ModelGroupDetail>(`/api/assets/modelgroup?${search}`)
   },
+
+  /** Companion-файлы модели (внешние текстуры + анимационные FBX). */
+  getModelBundle: (id: number) => http<ModelBundle>(`/api/assets/${id}/bundle`),
 }
 
 export const thumbUrl = (asset: Asset, size: 128 | 256 | 512 | 1024) =>
@@ -112,8 +118,10 @@ export const modelUrl = (asset: Asset) => rawUrl(asset.sourceId, asset.relPath)
 /**
  * Версия клиентского рендера 3D-превью. Меняем при правках рендера (свет/камера/материалы) —
  * новый rev даёт новый ключ кэша на бэке, старые превью инвалидируются сами.
+ * rev=2: рендер с внешними текстурами (TGA + резолв через bundle).
+ * rev=3: авто-привязка текстур из bundle по конвенции имён (Unity .mat без ссылок в FBX).
  */
-export const MODEL_THUMB_REV = 1
+export const MODEL_THUMB_REV = 3
 /** Канонический размер мастер-превью; меньшие размеры сервер ужимает из него. */
 export const MODEL_THUMB_MASTER = 512
 

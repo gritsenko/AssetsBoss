@@ -1,5 +1,6 @@
-import { FolderSimple, X } from '@phosphor-icons/react'
+import { FolderOpen, FolderSimple, Warning, X } from '@phosphor-icons/react'
 import { useState } from 'react'
+import { api } from '../api/client'
 import type { Source } from '../api/types'
 import { ACCENT } from '../theme'
 import { IconButton } from './ui'
@@ -52,7 +53,8 @@ export function SettingsModal({
   if (!open) return null
 
   // Локальные папки; источники сторонних провайдеров рисуют их собственные секции-расширения.
-  const folders = sources?.filter((s) => s.scheme === 'local')
+  const folders = sources?.filter((s) => s.scheme === 'local' && s.available)
+  const unavailable = sources?.filter((s) => !s.available)
 
   const extCtx: ExtensionContext = { sources, removeSource, renameSource, showToast }
 
@@ -69,6 +71,49 @@ export function SettingsModal({
       setError(null)
       setAdding(false)
     }
+  }
+
+  const browseAndFill = async () => {
+    setBusy(true)
+    try {
+      const res = await api.browseFolder()
+      if (res?.path) {
+        setPath(res.path)
+        setAdding(true)
+        setError(null)
+      }
+    } catch {
+      // not available in dev mode — just show text input
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const startAdding = async () => {
+    if (adding) {
+      await submitFolder()
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await api.browseFolder()
+      if (res?.path) {
+        setBusy(true)
+        const err = await addSource(res.path)
+        setBusy(false)
+        if (err) {
+          setPath(res.path)
+          setAdding(true)
+          setError(err)
+        }
+        return
+      }
+    } catch {
+      // not available — fall through to manual input
+    } finally {
+      setBusy(false)
+    }
+    setAdding(true)
   }
 
   return (
@@ -148,21 +193,26 @@ export function SettingsModal({
 
             {adding && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <input
-                  autoFocus
-                  value={path}
-                  onChange={(e) => setPath(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') submitFolder()
-                    if (e.key === 'Escape') {
-                      setAdding(false)
-                      setError(null)
-                    }
-                  }}
-                  placeholder="C:\Path\To\Assets"
-                  className="font-mono"
-                  style={panelInputStyle}
-                />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    autoFocus
+                    value={path}
+                    onChange={(e) => setPath(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') submitFolder()
+                      if (e.key === 'Escape') {
+                        setAdding(false)
+                        setError(null)
+                      }
+                    }}
+                    placeholder="C:\Path\To\Assets"
+                    className="font-mono"
+                    style={{ ...panelInputStyle, flex: 1 }}
+                  />
+                  <IconButton onClick={browseAndFill} title="Browse…" size={32}>
+                    <FolderOpen size={15} />
+                  </IconButton>
+                </div>
                 {error && <span style={{ fontSize: 11, color: 'var(--danger)' }}>{error}</span>}
               </div>
             )}
@@ -170,13 +220,50 @@ export function SettingsModal({
             <AddProviderButton
               busy={busy}
               label="Add folder"
-              onClick={() => {
-                if (adding) submitFolder()
-                else setAdding(true)
-              }}
+              onClick={startAdding}
             />
           </div>
         </div>
+
+        {unavailable && unavailable.length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Warning size={14} color="var(--danger)" weight="fill" />
+              Unavailable sources
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>
+              These sources use a plugin that is no longer installed. You can remove them.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {unavailable.map((src) => (
+                <div
+                  key={src.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    background: 'var(--card)',
+                    border: '1px solid var(--line)',
+                    borderRadius: 8,
+                    padding: '8px 10px',
+                    opacity: 0.75,
+                  }}
+                >
+                  <Warning size={13} color="var(--danger)" weight="fill" style={{ flex: '0 0 auto' }} />
+                  <span
+                    className="font-mono"
+                    style={{ flex: 1, fontSize: 11, color: 'var(--ink2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={src.root}
+                  >
+                    {src.name}
+                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--faint)', flex: '0 0 auto' }}>{src.scheme}</span>
+                  <RemoveButton onClick={() => removeSource(src.id)} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {providerExtensions.map((ext) => (
           <div key={ext.id} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>

@@ -23,6 +23,12 @@ public sealed record AnimClipDto(string Name, IReadOnlyList<Asset> Frames);
 
 public sealed record AnimGroupDetail(long SourceId, string Dir, string Name, IReadOnlyList<AnimClipDto> Clips);
 
+/// <summary>Сырые companion-файлы модели из индекса: текстуры, анимации, Unity-материалы (.mat).</summary>
+public sealed record ModelCompanions(
+    IReadOnlyList<ModelCompanion> Textures,
+    IReadOnlyList<ModelCompanion> Animations,
+    IReadOnlyList<string> MaterialFiles);
+
 public sealed class AssetRepository(Db db)
 {
     private const string AssetColumns =
@@ -222,6 +228,97 @@ public sealed class AssetRepository(Db db)
                AND {BaseNameLower} = lower(@name)
              ORDER BY {CoverRank}, a.name
              """, new { sourceId, dir, name }).ToList();
+    }
+
+    /// <summary>
+    /// Папки-«роли»/форматы внутри контейнера модели: их сегмент срезается при вычислении
+    /// scope-папки для поиска companion-файлов (см. <see cref="BundleScopeDir"/>).
+    /// </summary>
+    private static readonly HashSet<string> RoleFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "model", "models", "mesh", "meshes", "fbx", "glb", "gltf", "obj", "dae", "stl", "3ds",
+        "blend", "blends", "source", "sources", "geo", "geometry",
+        "fbx format", "glb format", "gltf format", "obj format", "dae format", "stl format", "3ds format",
+    };
+
+    /// <summary>
+    /// Контейнер модели для поиска companion-файлов: parent_dir с отрезанным хвостовым
+    /// сегментом-ролью (Model/FBX/glTF…). Так текстуры в соседней <c>Materials/</c> и анимации
+    /// в соседней <c>Animations/</c> попадают в одну область поиска с мешем. Пусто → весь источник.
+    /// </summary>
+    private static string BundleScopeDir(string parentDir)
+    {
+        if (string.IsNullOrEmpty(parentDir)) return "";
+        var slash = parentDir.LastIndexOf('/');
+        var last = slash < 0 ? parentDir : parentDir[(slash + 1)..];
+        if (!RoleFolders.Contains(last)) return parentDir;
+        return slash < 0 ? "" : parentDir[..slash];
+    }
+
+    /// <summary>
+    /// Связанные с моделью файлы (по индексу источника, без обхода ФС): внешние текстуры
+    /// (kind=image в пределах контейнера), внешние анимационные FBX и Unity-материалы (.mat).
+    /// Анимация — это .fbx в папке Animation(s)/Anim(s) ИЛИ файл, имя которого начинается с
+    /// basename меша; сам меш и риг-хабы (<c>*_hub.*</c>) исключаются. Универсально для
+    /// Unity-раскладок (папка на модель, отдельные клипы) и Blender-экспорта (форматные папки).
+    /// </summary>
+    public ModelCompanions GetModelCompanions(Asset model)
+    {
+        var scope = BundleScopeDir(model.ParentDir);
+        var basePrefix = Path.GetFileNameWithoutExtension(model.Name).ToLowerInvariant();
+        var p = new
+        {
+            src = model.SourceId,
+            scope,
+            scopePrefix = EscapeLike(scope) + "/%",
+            selfId = model.Id,
+            meshPrefix = EscapeLike(basePrefix) + "%",
+        };
+
+        // scope='' (форматная папка в корне источника) → ищем по всему источнику
+        const string ScopeFilter =
+            "(@scope = '' OR a.parent_dir = @scope OR a.parent_dir LIKE @scopePrefix ESCAPE '\\')";
+
+        const string AnimFolder =
+            "(lower(a.parent_dir) IN ('anim','anims','animation','animations') "
+            + "OR lower(a.parent_dir) LIKE '%/anim' OR lower(a.parent_dir) LIKE '%/anims' "
+            + "OR lower(a.parent_dir) LIKE '%/animation' OR lower(a.parent_dir) LIKE '%/animations')";
+
+        using var conn = db.Open();
+
+        var textures = conn.Query<ModelCompanion>(
+            $"""
+             SELECT a.name AS Name, a.rel_path AS RelPath FROM assets a
+             WHERE a.source_id = @src AND a.kind = {(int)AssetKind.Image} AND {ScopeFilter}
+             ORDER BY a.rel_path LIMIT 64
+             """, p).ToList();
+
+        var animations = conn.Query<ModelCompanion>(
+            $"""
+             SELECT a.name AS Name, a.rel_path AS RelPath FROM assets a
+             WHERE a.source_id = @src AND a.kind = {(int)AssetKind.Model} AND lower(a.ext) = '.fbx'
+               AND a.id != @selfId AND {ScopeFilter}
+               AND ({AnimFolder} OR lower(a.name) LIKE @meshPrefix ESCAPE '\')
+               AND lower(a.name) NOT LIKE '%\_hub.%' ESCAPE '\'
+             ORDER BY a.name LIMIT 128
+             """, p).ToList();
+
+        // Unity-материалы рядом с моделью — источник точного маппинга текстур по слотам
+        var materialFiles = conn.Query<string>(
+            $"""
+             SELECT a.rel_path FROM assets a
+             WHERE a.source_id = @src AND lower(a.ext) = '.mat' AND {ScopeFilter}
+             ORDER BY a.rel_path LIMIT 128
+             """, p).ToList();
+
+        return new ModelCompanions(textures, animations, materialFiles);
+    }
+
+    /// <summary>Текстуры + анимации модели (без Unity-обогащения слотов — см. ModelBundleService).</summary>
+    public ModelBundle GetModelBundle(Asset model)
+    {
+        var c = GetModelCompanions(model);
+        return new ModelBundle(model.SourceId, c.Textures, c.Animations);
     }
 
     /// <summary>

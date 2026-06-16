@@ -43,6 +43,15 @@ public static class AssetsApi
                 : Results.NotFound();
         });
 
+        // Companion-файлы 3D-модели (внешние текстуры + анимационные FBX, плюс слоты текстур из
+        // Unity .mat/.meta, если есть) — для надёжного резолва текстур и подгрузки анимаций. Только модели.
+        group.MapGet("/assets/{id:long}/bundle", async (
+            long id, Core.Models.ModelBundleService bundles, CancellationToken ct) =>
+        {
+            var bundle = await bundles.GetAsync(id, ct);
+            return bundle is null ? Results.NotFound() : Results.Ok(bundle);
+        });
+
         // Разнообразное превью папки: N равномерно распределённых ассетов + общий счётчик
         group.MapGet("/assets/folder-preview", (AssetRepository assets, long sourceId, string dir, int limit = 4) =>
         {
@@ -62,7 +71,8 @@ public static class AssetsApi
             var src = sources.GetById(asset.SourceId);
             if (src is null) return Results.NotFound();
 
-            var provider = providers.Get(src.Scheme);
+            var provider = providers.TryGet(src.Scheme);
+            if (provider is null) return Results.StatusCode(503);
             var contentType = ContentTypes.TryGetContentType(asset.Name, out var type)
                 ? type : "application/octet-stream";
 
@@ -84,7 +94,8 @@ public static class AssetsApi
             var src = sources.GetById(id);
             if (src is null) return Results.NotFound();
 
-            var provider = providers.Get(src.Scheme);
+            var provider = providers.TryGet(src.Scheme);
+            if (provider is null) return Results.StatusCode(503);
             var contentType = ContentTypes.TryGetContentType(Path.GetFileName(relPath), out var type)
                 ? type : "application/octet-stream";
 
@@ -116,9 +127,11 @@ public static class AssetsApi
 
             // модели сервер не рендерит (нет headless-GL на ARM) — клиент кладёт мастер (512),
             // сервер ужимает из него меньшие размеры; картинки рендерим/кэшируем как раньше
+            var thumbProvider = providers.TryGet(src.Scheme);
+            if (thumbProvider is null && asset.Kind != AssetKind.Model) return Results.StatusCode(503);
             var result = asset.Kind == AssetKind.Model
                 ? await thumbs.GetModelThumbAsync(asset, size, rev, ct)
-                : await thumbs.GetOrCreateAsync(asset, src, providers.Get(src.Scheme), size, ct);
+                : await thumbs.GetOrCreateAsync(asset, src, thumbProvider!, size, ct);
             if (result is null) return Results.NotFound();
 
             // URL содержит v={mtime} → содержимое по этому URL неизменно

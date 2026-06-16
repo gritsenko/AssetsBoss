@@ -18,6 +18,9 @@ public sealed record ServerOptions
 
     /// <summary>Каталог статики фронтенда; null в dev (фронт отдаёт Vite).</summary>
     public string? WwwRoot { get; init; }
+
+    /// <summary>Открывает системный диалог выбора папки; null в dev-режиме (без окна).</summary>
+    public Func<Task<string?>>? BrowseForFolder { get; init; }
 }
 
 /// <summary>
@@ -57,11 +60,13 @@ public static class ServerHost
 
         var plugins = PluginLoader.Discover();
 
+        builder.Services.AddSingleton(new FolderBrowserService(options.BrowseForFolder));
         builder.Services.AddSingleton(new Db(AppPaths.DbFile));
         builder.Services.AddSingleton<SourceRepository>();
         builder.Services.AddSingleton<AssetRepository>();
         builder.Services.AddSingleton<IAssetProvider, LocalFolderProvider>();
         builder.Services.AddSingleton<ProviderRegistry>();
+        builder.Services.AddSingleton<Core.Models.ModelBundleService>();
         builder.Services.AddSingleton<IndexScanner>();
         builder.Services.AddSingleton<ScanService>();
         builder.Services.AddSingleton<WatcherService>();
