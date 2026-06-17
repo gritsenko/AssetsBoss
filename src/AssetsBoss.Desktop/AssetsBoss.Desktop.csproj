@@ -6,6 +6,31 @@
     <AssemblyName>AssetsBoss</AssemblyName>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- манифест путей встроенных ресурсов для ManifestEmbeddedFileProvider -->
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+  </PropertyGroup>
+
+  <!-- Метаданные exe (Explorer → Свойства, версия файла) -->
+  <PropertyGroup>
+    <Product>AssetsBoss</Product>
+    <Authors>Igor Gritsenko</Authors>
+    <Company>AssetsBoss</Company>
+    <Description>Лёгкий браузер локальных игровых ассетов</Description>
+    <Copyright>Copyright © 2026</Copyright>
+    <Version>0.1.0</Version>
+    <FileVersion>0.1.0.0</FileVersion>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <!-- True single-file: применяется только при publish с указанным RID
+       (dotnet publish -r win-… с self-contained). Обычный build/run/debug не затрагивает.
+       Фронтенд встроен в сборку (EmbeddedResource ниже), нативные DLL Photino и рантайм .NET
+       бандлятся в exe и саморазворачиваются при старте — на диск ложится один .exe. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,26 +38,34 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.9" />
     <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+
+  <!-- app.ico встроена в exe как Win32-иконка (ApplicationIcon) и как managed-ресурс —
+       Program.cs разворачивает её во временный файл для иконки окна Photino. -->
+  <ItemGroup>
+    <EmbeddedResource Include="app.ico" />
   </ItemGroup>
 
   <PropertyGroup>
     <FrontendDir>$(MSBuildProjectDirectory)\..\..\frontend</FrontendDir>
   </PropertyGroup>
 
-  <!-- При publish: собрать фронтенд и положить dist как wwwroot рядом с exe.
-       npm ci только при отсутствии node_modules: clean-install сносит каталог
-       и падает с EPERM, если запущен Vite dev-сервер. -->
-  <Target Name="BuildFrontend" BeforeTargets="ComputeFilesToPublish">
-    <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)"
-          Condition="!Exists('$(FrontendDir)\node_modules')" />
-    <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" />
-    <ItemGroup>
-      <FrontendDist Include="$(FrontendDir)\dist\**" />
-      <ResolvedFileToPublish Include="@(FrontendDist)"
-          RelativePath="wwwroot\%(RecursiveDir)%(Filename)%(Extension)"
-          CopyToPublishDirectory="PreserveNewest" />
-    </ItemGroup>
+  <!-- Встраиваем собранный фронтенд в сборку под путём wwwroot/* (его раздаёт
+       ManifestEmbeddedFileProvider в release). Glob подхватывает все файлы dist,
+       включая новые после изменений во фронтенде — ручной список не нужен.
+       dist должен быть собран заранее (npm run build) — это делает tools/package.ps1. -->
+  <ItemGroup Condition="Exists('$(FrontendDir)\dist\index.html')">
+    <EmbeddedResource Include="$(FrontendDir)\dist\**\*">
+      <Link>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- При publish dist обязателен (иначе фронтенд не встроится в exe). -->
+  <Target Name="EnsureFrontendBuilt" BeforeTargets="ComputeFilesToPublish">
+    <Error Condition="!Exists('$(FrontendDir)\dist\index.html')"
+           Text="frontend\dist не собран. Запусти 'npm run build' в frontend (или используй tools\package.ps1)." />
   </Target>
 
   <!-- Отладка Desktop (Debug): обычная сборка не запускает BuildFrontend (тот только для publish),

@@ -11,7 +11,7 @@
 Один и тот же Kestrel (только `127.0.0.1`) обслуживает API в dev и release:
 
 - **dev** — два процесса: `dotnet watch` (API, порт 5210) + Vite (UI, порт 5173, прокси `/api` → 5210);
-- **release** — Photino-окно открывает `http://127.0.0.1:{случайный порт}`, Kestrel дополнительно отдаёт статику фронтенда из `wwwroot`.
+- **release** — Photino-окно открывает `http://127.0.0.1:{случайный порт}`, Kestrel дополнительно отдаёт фронтенд, встроенный в сборку (`ManifestEmbeddedFileProvider`), — отдельной папки `wwwroot` на диске нет.
 
 ```
 src/AssetsBoss.Core                 домен, IAssetProvider, SQLite-индекс, сканер, миниатюры
@@ -39,13 +39,45 @@ cd frontend; npm run dev                         # Vite HMR → http://localhost
 
 ## Сборка релиза
 
+Упаковка в портативные single-file `.exe` под обе архитектуры — одним скриптом:
+
 ```powershell
-dotnet publish src/AssetsBoss.Desktop -c Release -r win-x64 --self-contained -o publish
+pwsh tools/package.ps1                 # win-arm64 + win-x64
+pwsh tools/package.ps1 -Rids win-x64   # только нужная арка
 ```
 
-Таргет `BuildFrontend` сам выполнит `npm ci && npm run build` и положит фронтенд в
-`publish\wwwroot`. Запуск — `publish\AssetsBoss.exe` (нужен WebView2 Runtime,
-на Windows 11 предустановлен).
+Скрипт собирает фронтенд один раз (`npm run build`), затем делает self-contained
+single-file publish под каждый RID и кладёт zip в `dist\`. Результат — **один**
+`AssetsBoss.exe`: внутрь упакованы рантайм .NET, managed-DLL, нативные DLL Photino,
+иконка и весь фронтенд (встроен как `EmbeddedResource` glob'ом по `frontend\dist` —
+новые файлы фронтенда подхватываются автоматически, ручной список не нужен).
+Комплект `AssetsBoss-<версия>-<rid>.zip` = единственный `AssetsBoss.exe`.
+
+Распаковал → запустил `AssetsBoss.exe`, установка не нужна (нужен лишь WebView2
+Runtime — на Windows 11 предустановлен). Версия/продукт берутся из `<Version>` в
+`AssetsBoss.Desktop.csproj`.
+
+> **Архитектура.** Машина разработки — `win-arm64` (см. `dotnet --info`). x64-сборка
+> работает на любых Windows-ПК (на ARM64 — через эмуляцию), arm64-сборка нативна,
+> но не запустится на обычных x64-ПК.
+>
+> **node.** Скрипт принудительно берёт системный node (`%ProgramFiles%\nodejs`):
+> менеджер версий в профиле (fnm) может подставить node другой архитектуры, чем
+> установленные нативные биндинги сборщика (rolldown), и `npm run build` падает на
+> загрузке `.node` не той арки.
+
+Ручной publish без скрипта (фронтенд нужно собрать заранее — `npm run build` в
+`frontend`, иначе встраивать будет нечего и publish упадёт с ошибкой об отсутствии
+`dist`):
+
+```powershell
+npm --prefix frontend run build
+dotnet publish src/AssetsBoss.Desktop -c Release -r win-arm64 --self-contained -o publish/win-arm64
+```
+
+Иконку (`src/AssetsBoss.Desktop/app.ico`) при изменении логотипа пересобрать из
+`frontend/public/favicon.svg` скриптом `tools/gen-icon.mjs` (нужны `@resvg/resvg-js`,
+ставятся во временную папку — см. комментарий в скрипте).
 
 ## Расширение
 

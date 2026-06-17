@@ -1,7 +1,9 @@
 using System.Drawing;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using AssetsBoss.Server;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Photino.NET;
 
@@ -29,12 +31,21 @@ internal static class Program
 
     private static void Run()
     {
+        var asm = Assembly.GetExecutingAssembly();
+
+        // Фронтенд встроен в сборку (см. EmbeddedResource в .csproj). На отладочной сборке
+        // без встроенного фронта манифеста нет — тогда фолбэк на каталог wwwroot рядом с exe.
+        IFileProvider? spa = null;
+        try { spa = new ManifestEmbeddedFileProvider(asm, "wwwroot"); }
+        catch (InvalidOperationException) { /* нет встроенного манифеста */ }
+
         var wwwRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
 
         var app = ServerHost.Build(new ServerOptions
         {
             Urls = "http://127.0.0.1:0", // случайный свободный порт, только loopback
-            WwwRoot = Directory.Exists(wwwRoot) ? wwwRoot : null,
+            WwwRootProvider = spa,
+            WwwRoot = spa is null && Directory.Exists(wwwRoot) ? wwwRoot : null,
             BrowseForFolder = BrowseFolder,
         });
         app.Start();
@@ -46,9 +57,15 @@ internal static class Program
             .SetUseOsDefaultSize(false)
             .SetSize(new Size(1440, 920))
             .Center()
-            .SetDevToolsEnabled(true)
-            // Сразу показываем нативный сплэш — WebView2 инициализируется в фоне,
-            // пользователь видит спиннер, а не белое окно.
+            .SetDevToolsEnabled(true);
+
+        var icon = ExtractWindowIcon(asm);
+        if (icon is not null)
+            window.SetIconFile(icon);
+
+        // Сразу показываем нативный сплэш — WebView2 инициализируется в фоне,
+        // пользователь видит спиннер, а не белое окно.
+        window
             .RegisterWindowCreatedHandler((_, _) => _ = NavigateWhenReady(window!, url))
             .LoadRawString(SplashHtml);
 
@@ -149,6 +166,31 @@ internal static class Program
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         return tcs.Task;
+    }
+
+    /// <summary>
+    /// app.ico встроена в exe как Win32-ресурс (ApplicationIcon) и как managed-ресурс.
+    /// Photino принимает только путь на диске, поэтому разворачиваем во временный файл.
+    /// </summary>
+    private static string? ExtractWindowIcon(Assembly asm)
+    {
+        var resName = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith("app.ico", StringComparison.OrdinalIgnoreCase));
+        if (resName is null)
+            return null;
+
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), "AssetsBoss.ico");
+            using (var rs = asm.GetManifestResourceStream(resName)!)
+            using (var fs = File.Create(path))
+                rs.CopyTo(fs);
+            return path;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

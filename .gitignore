@@ -496,3 +496,6 @@ NuGet.config
 frontend/src/extensions/private/*
 !frontend/src/extensions/private/.gitignore
 
+# Packaged portable archives (tools/package.ps1)
+/dist/
+

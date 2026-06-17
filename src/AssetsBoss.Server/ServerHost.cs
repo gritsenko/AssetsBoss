@@ -5,6 +5,7 @@ using AssetsBoss.Core.Indexing;
 using AssetsBoss.Core.Providers;
 using AssetsBoss.Core.Thumbnails;
 using AssetsBoss.Server.Api;
+using Microsoft.Extensions.FileProviders;
 using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
@@ -16,11 +17,14 @@ public sealed record ServerOptions
     /// <summary>null → URL из launchSettings/окружения (dev); release передаёт "http://127.0.0.1:0".</summary>
     public string? Urls { get; init; }
 
-    /// <summary>Каталог статики фронтенда; null в dev (фронт отдаёт Vite).</summary>
+    /// <summary>Каталог статики фронтенда на диске; null в dev (фронт отдаёт Vite).</summary>
     public string? WwwRoot { get; init; }
 
     /// <summary>Открывает системный диалог выбора папки; null в dev-режиме (без окна).</summary>
     public Func<Task<string?>>? BrowseForFolder { get; init; }
+
+    /// <summary>Встроенный (embedded) фронтенд для single-file release; приоритетнее <see cref="WwwRoot"/>.</summary>
+    public IFileProvider? WwwRootProvider { get; init; }
 }
 
 /// <summary>
@@ -97,10 +101,25 @@ public static class ServerHost
             app.MapScalarApiReference();
         }
 
-        if (options.WwwRoot is not null)
+        // Фронтенд: встроенный (single-file release) приоритетнее каталога на диске.
+        var spa = options.WwwRootProvider
+                  ?? (options.WwwRoot is not null ? new PhysicalFileProvider(options.WwwRoot) : null);
+        if (spa is not null)
         {
-            app.UseStaticFiles();
-            app.MapFallbackToFile("index.html");
+            app.UseStaticFiles(new StaticFileOptions { FileProvider = spa });
+            // SPA-fallback: любой не-API/не-статичный маршрут отдаёт index.html
+            app.MapFallback(async ctx =>
+            {
+                var index = spa.GetFileInfo("index.html");
+                if (!index.Exists)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await using var stream = index.CreateReadStream();
+                await stream.CopyToAsync(ctx.Response.Body);
+            });
         }
 
         // при старте: поднять watcher'ы и догнать индекс ресканом всех источников
