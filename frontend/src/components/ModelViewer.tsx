@@ -42,6 +42,10 @@ export default function ModelViewer({ asset, dark }: Props) {
   const [embedded, setEmbedded] = useState<ClipOption[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [playing, setPlaying] = useState(true)
+  // ручная переориентация (фолбэк, если ось из FBX определилась неверно): переключатель Z↔Y.
+  // Y — как определил авто-анализ оси; Z — доворот на 90° вокруг X. Эфемерно, превью не трогает.
+  const [upZ, setUpZ] = useState(false)
+  const manualRot = useMemo<[number, number, number]>(() => (upZ ? [-Math.PI / 2, 0, 0] : [0, 0, 0]), [upZ])
   const bg = dark ? '#1B1914' : '#ECE9E0'
 
   // bundle резолвит текстуры и даёт список внешних анимаций; грузим меш только когда он осел
@@ -79,6 +83,7 @@ export default function ModelViewer({ asset, dark }: Props) {
               bundleSettled={bundleSettled}
               selected={selected}
               playing={playing}
+              manualRot={manualRot}
               onStatus={setStatus}
               onEmbeddedClips={setEmbedded}
             />
@@ -101,6 +106,8 @@ export default function ModelViewer({ asset, dark }: Props) {
           onTogglePlay={() => setPlaying((p) => !p)}
         />
       )}
+
+      {status === 'ready' && <OrientControls dark={dark} upZ={upZ} onToggle={() => setUpZ((v) => !v)} />}
 
       {status !== 'ready' && (
         <div
@@ -129,12 +136,15 @@ interface ObjectProps {
   bundleSettled: boolean
   selected: ClipOption | null
   playing: boolean
+  /** Ручной доворот [x,y,z] в радианах поверх авто-коррекции оси (эфемерный, для текущей сессии). */
+  manualRot: [number, number, number]
   onStatus: (s: Status) => void
   onEmbeddedClips: (clips: ClipOption[]) => void
 }
 
-function ModelObject({ asset, bundle, bundleSettled, selected, playing, onStatus, onEmbeddedClips }: ObjectProps) {
+function ModelObject({ asset, bundle, bundleSettled, selected, playing, manualRot, onStatus, onEmbeddedClips }: ObjectProps) {
   const [obj, setObj] = useState<THREE.Object3D | null>(null)
+  const groupRef = useRef<THREE.Group>(null)
   const bounds = useBounds()
   const mixerRef = useRef<THREE.AnimationMixer | null>(null)
   const actionRef = useRef<THREE.AnimationAction | null>(null)
@@ -180,10 +190,11 @@ function ModelObject({ asset, bundle, bundleSettled, selected, playing, onStatus
     }
   }, [asset, bundle, bundleSettled, onStatus, onEmbeddedClips])
 
-  // переподогнать камеру под габариты, как только модель появилась
+  // переподогнать камеру под габариты, как только модель появилась или сменился ручной поворот
   useEffect(() => {
-    if (obj) bounds.refresh(obj).clip().fit()
-  }, [obj, bounds])
+    const target = groupRef.current ?? obj
+    if (obj && target) bounds.refresh(target).clip().fit()
+  }, [obj, bounds, manualRot])
 
   // применить выбранный клип: остановить прежний, проиграть новый (внешний — грузим лениво)
   useEffect(() => {
@@ -224,7 +235,74 @@ function ModelObject({ asset, bundle, bundleSettled, selected, playing, onStatus
     if (playing && mixerRef.current) mixerRef.current.update(delta)
   })
 
-  return obj ? <primitive object={obj} /> : null
+  return obj ? (
+    <group ref={groupRef} rotation={manualRot}>
+      <primitive object={obj} />
+    </group>
+  ) : null
+}
+
+interface OrientProps {
+  dark: boolean
+  upZ: boolean
+  onToggle: () => void
+}
+
+// Иконки «вектора вверх» из Online3DViewer (assets/icons/up_y.svg, up_z.svg) — куб с осью и
+// стрелками доворота. stroke=currentColor, чтобы подхватывать цвет темы.
+const UP_Y_PATH =
+  'M11 4.3 9.2 2.5M11 .7 9.2 2.5m6.3 6V6c0-1.9-1.6-3.5-3.5-3.5H9.5m-6 10.1 7 4.1m-7-15.2v11.1m11-.1v3m-11-3 7-4m-9-5 2-2m2 2-2-2m9 9 2 2m2-2-2 2'
+const UP_Z_PATH =
+  'M11 4.3 9.2 2.5M11 .7 9.2 2.5m6.3 6V6c0-1.9-1.6-3.5-3.5-3.5H9.5m-6 10.1 7 4.1m-7-15.2v11.1m0-.1 7-4m-9-5 2-2m2 2-2-2m9 9h4m-4 5h4m-4 0 4-5'
+
+function UpAxisIcon({ z }: { z: boolean }) {
+  return (
+    <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
+      <path
+        d={z ? UP_Z_PATH : UP_Y_PATH}
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeMiterlimit={10}
+      />
+    </svg>
+  )
+}
+
+/**
+ * Ручная переориентация одной кнопкой: переключатель вертикальной оси Z↔Y (фолбэк, когда ось
+ * из FBX определилась неверно). Иконка (как в Online3DViewer) и состояние меняются по клику.
+ * Эфемерно — на превью в галерее не влияет.
+ */
+function OrientControls({ dark, upZ, onToggle }: OrientProps) {
+  const panel = dark ? 'rgba(24,21,16,0.95)' : 'rgba(247,244,237,0.97)'
+  const text = dark ? '#ece7d9' : '#26231d'
+  const border = dark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)'
+
+  return (
+    <div style={{ position: 'absolute', right: 10, top: 10 }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        title={upZ ? 'Вертикальная ось: Z (нажми — Y)' : 'Вертикальная ось: Y (нажми — Z)'}
+        style={{
+          width: 28,
+          height: 28,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: `1px solid ${border}`,
+          borderRadius: 6,
+          cursor: 'pointer',
+          color: text,
+          background: panel,
+        }}
+      >
+        <UpAxisIcon z={upZ} />
+      </button>
+    </div>
+  )
 }
 
 interface PickerProps {

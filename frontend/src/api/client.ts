@@ -120,8 +120,9 @@ export const modelUrl = (asset: Asset) => rawUrl(asset.sourceId, asset.relPath)
  * новый rev даёт новый ключ кэша на бэке, старые превью инвалидируются сами.
  * rev=2: рендер с внешними текстурами (TGA + резолв через bundle).
  * rev=3: авто-привязка текстур из bundle по конвенции имён (Unity .mat без ссылок в FBX).
+ * rev=4: коррекция оси FBX (Z-up → Y-up) по UpAxis из GlobalSettings.
  */
-export const MODEL_THUMB_REV = 3
+export const MODEL_THUMB_REV = 4
 /** Канонический размер мастер-превью; меньшие размеры сервер ужимает из него. */
 export const MODEL_THUMB_MASTER = 512
 

@@ -8,6 +8,7 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { TGALoader } from 'three/examples/jsm/loaders/TGALoader.js'
 import { modelUrl, rawUrl } from '../../api/client'
 import type { Asset, ModelBundle, ModelCompanion } from '../../api/types'
+import { fbxUpCorrection, readFbxAxis } from './fbxAxis'
 
 export { canViewModel, VIEWABLE_MODEL_EXTS } from './modelFormats'
 
@@ -87,7 +88,7 @@ export async function loadModel(asset: Asset, bundle?: ModelBundle): Promise<THR
   }
 
   if (e === '.fbx') {
-    obj = (await new FBXLoader(manager).loadAsync(url)) as unknown as THREE.Object3D
+    obj = await loadFbx(url, manager)
   } else if (e === '.obj') {
     const objLoader = new OBJLoader(manager)
     // .mtl лежит рядом с .obj — подтягиваем материалы/текстуры; нет файла — дефолтный материал
@@ -111,6 +112,30 @@ export async function loadModel(asset: Asset, bundle?: ModelBundle): Promise<THR
   await new Promise((r) => setTimeout(r, 300))
   sanitizeMaterials(obj)
   await applyBundleTextures(obj, bundle, asset.sourceId, manager)
+  return obj
+}
+
+/**
+ * Грузит FBX и доворачивает его под Y-up three.js по объявленной в файле оси. FBXLoader не
+ * применяет UpAxis сам (Z-up модели из 3ds Max/Maya могут приехать повёрнутыми), а наружу ось
+ * не отдаёт — поэтому читаем её прямо из буфера. Буфер качаем один раз и парсим через
+ * FBXLoader.parse (loadAsync внутри делает ровно то же — fetch + parse), так что лишнего запроса
+ * нет. Текстуры по-прежнему резолвятся через manager (URLModifier бандла), path — каталог модели.
+ */
+async function loadFbx(url: string, manager: THREE.LoadingManager): Promise<THREE.Object3D> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`FBX fetch failed: ${res.status} ${res.statusText}`)
+  const buffer = await res.arrayBuffer()
+
+  const path = THREE.LoaderUtils.extractUrlBase(url)
+  const obj = new FBXLoader(manager).parse(buffer, path) as unknown as THREE.Object3D
+
+  const correction = fbxUpCorrection(readFbxAxis(buffer))
+  if (correction) {
+    // premultiply — доворот в мировой системе поверх собственного трансформа корня
+    obj.quaternion.premultiply(correction)
+    obj.updateMatrixWorld(true)
+  }
   return obj
 }
 
