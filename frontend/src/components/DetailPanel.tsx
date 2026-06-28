@@ -1,6 +1,6 @@
 import { ArrowSquareOut, ArrowsOut, Copy, Cube, FilmStrip, FolderOpen, ImageSquare, X } from '@phosphor-icons/react'
 import { useMemo, useState } from 'react'
-import { contentUrl, thumbUrl } from '../api/client'
+import { api, contentUrl, thumbUrl } from '../api/client'
 import type { AnimGroupDetail, Asset } from '../api/types'
 import { useAnimGroup } from '../hooks/useAnimGroup'
 import { useFramePlayer } from '../hooks/useFramePlayer'
@@ -20,6 +20,7 @@ import { extLabel, formatDate, formatSize } from '../lib/format'
 import { displayKind, isBrowserRenderableImage } from '../lib/kind'
 import { canViewModel } from '../lib/three/modelFormats'
 import { AnimPlayerControls } from './AnimPlayer'
+import { AudioPlayer } from './AudioPlayer'
 import { IconButton } from './ui'
 import { ModelViewer } from './ModelViewerLazy'
 import { useToast } from '../hooks/toastContext'
@@ -399,7 +400,13 @@ function Body({
     }
   }
 
-  const openOriginal = () => window.open(contentUrl(asset), '_blank', 'noopener')
+  const openOriginal = async () => {
+    try {
+      await api.openAsset(asset.id)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Не удалось открыть файл')
+    }
+  }
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -529,7 +536,13 @@ function ModelGroupBody({
       showToast('Could not copy path')
     }
   }
-  const openOriginal = () => window.open(contentUrl(asset), '_blank', 'noopener')
+  const openOriginal = async () => {
+    try {
+      await api.openAsset(asset.id)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Не удалось открыть файл')
+    }
+  }
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -726,23 +739,7 @@ function Preview({
   }
 
   if (dk === 'audio') {
-    return (
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 18,
-          padding: '0 22px',
-        }}
-      >
-        <Waveform seed={asset.id} />
-        <audio src={contentUrl(asset)} controls preload="metadata" style={{ width: '100%' }} />
-      </div>
-    )
+    return <AudioPlayer asset={asset} dark={dark} />
   }
 
   if (dk === 'model') {
@@ -790,33 +787,6 @@ function ModelUnsupported({ ext }: { ext: string }) {
     >
       <Cube size={34} weight="thin" />
       <div style={{ fontSize: 12, color: 'var(--muted)' }}>No 3D preview for {extLabel(ext)}</div>
-    </div>
-  )
-}
-
-function Waveform({ seed }: { seed: number }) {
-  const bars = useMemo(() => {
-    let t = (seed * 2654435761) >>> 0
-    let h = 40
-    const out: number[] = []
-    const rnd = () => {
-      t += 0x6d2b79f5
-      let r = Math.imul(t ^ (t >>> 15), 1 | t)
-      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r)
-      return ((r ^ (r >>> 14)) >>> 0) / 4294967296
-    }
-    for (let i = 0; i < 52; i++) {
-      h = Math.max(10, Math.min(110, h + (rnd() - 0.5) * 46))
-      out.push(Math.round(h))
-    }
-    return out
-  }, [seed])
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 3, height: 120, width: '100%', justifyContent: 'center' }}>
-      {bars.map((h, i) => (
-        <div key={i} style={{ width: 4, borderRadius: 2, background: 'rgba(233,226,209,0.5)', height: h, flex: '0 0 auto' }} />
-      ))}
     </div>
   )
 }

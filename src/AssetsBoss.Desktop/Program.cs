@@ -65,12 +65,38 @@ internal static class Program
 
         // Сразу показываем нативный сплэш — WebView2 инициализируется в фоне,
         // пользователь видит спиннер, а не белое окно.
+        //
+        // Навигацию на реальный URL запускаем ТОЛЬКО после web-сообщения
+        // 'splash-ready' от сплэша. Это единственный надёжный признак, что WebView2
+        // полностью инициализирован: раз страница выполнила JS и достучалась до моста —
+        // нативный контрол готов принимать Navigate. Раньше навигация шла из
+        // WindowCreated, который срабатывает ДО старта цикла сообщений и до готовности
+        // WebView2 → гонка и периодический AV 0xC0000005 внутри Photino_NavigateToUrl.
         window
-            .RegisterWindowCreatedHandler((_, _) => _ = NavigateWhenReady(window!, url))
+            .RegisterWebMessageReceivedHandler((_, msg) =>
+            {
+                if (msg == "splash-ready")
+                    TryNavigate(window!, url);
+            })
+            // Подстраховка: если мост почему-то не пришлёт сообщение, всё равно
+            // перейдём на приложение — к этому моменту WebView2 гарантированно готов.
+            .RegisterWindowCreatedHandler((_, _) =>
+                _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => TryNavigate(window!, url)))
             .LoadRawString(SplashHtml);
 
         window.WaitForClose();
         app.StopAsync().GetAwaiter().GetResult();
+    }
+
+    private static int _navigated;
+
+    // Переход на реальный URL должен случиться ровно один раз — кто из триггеров
+    // (web-сообщение сплэша либо страховочный таймер) сработает первым.
+    private static void TryNavigate(PhotinoWindow window, string url)
+    {
+        if (Interlocked.Exchange(ref _navigated, 1) != 0)
+            return;
+        _ = NavigateWhenReady(window, url);
     }
 
     // Ждём, пока сервер отдаёт /api/health, затем переходим на настоящий URL.
@@ -146,6 +172,18 @@ internal static class Program
         <body>
         <div class="boot-spinner"></div>
         <div class="boot-word">AssetsBoss</div>
+        <script>
+          // Сигнал хосту, что WebView2 ожил и исполняет JS → можно навигировать на
+          // приложение. Мост Photino (window.external.sendMessage) инжектится не
+          // мгновенно, поэтому дожидаемся его появления.
+          (function notifyReady() {
+            if (window.external && window.external.sendMessage) {
+              window.external.sendMessage('splash-ready');
+            } else {
+              setTimeout(notifyReady, 30);
+            }
+          })();
+        </script>
         </body>
         </html>
         """;
@@ -156,6 +194,12 @@ internal static class Program
         var tcs = new TaskCompletionSource<string?>();
         var thread = new Thread(() =>
         {
+            // Photino делает per-monitor DPI-aware только свой UI-поток, но не процесс.
+            // Новый поток наследует awareness процесса (Unaware) → системный диалог
+            // выбора папки рендерится через bitmap-масштабирование и выглядит размытым
+            // на hi-DPI. Помечаем поток per-monitor v2 aware ДО создания окна диалога.
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
             using var dlg = new FolderBrowserDialog
             {
                 Description = "Выберите папку с ассетами",
@@ -195,4 +239,12 @@ internal static class Program
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
+
+    // Псевдо-хэндл per-monitor DPI awareness v2 (Win10 1607+). Применяется к окнам,
+    // создаваемым в потоке ПОСЛЕ вызова; awareness процесса не трогаем (своим окном
+    // Photino управляет сам).
+    private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new(-4);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
 }

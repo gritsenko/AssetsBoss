@@ -14,6 +14,10 @@ public class Asset
     public int? Width { get; init; }
     public int? Height { get; init; }
 
+    /// <summary>Длительность аудио в миллисекундах из кэша волны (audio_waveforms); null —
+    /// не аудио либо волна ещё не построена клиентом. Совпадение mtime гарантирует свежесть.</summary>
+    public long? DurationMs { get; init; }
+
     /// <summary>Кластер клипов («персонаж») в пределах (source_id, parent_dir); null — не кадр анимации.</summary>
     public string? AnimGroup { get; init; }
 

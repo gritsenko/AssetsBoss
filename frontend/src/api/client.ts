@@ -3,6 +3,7 @@ import type {
   Asset,
   AssetPage,
   AssetQueryParams,
+  AudioWaveform,
   DirNode,
   GroupRef,
   ModelBundle,
@@ -97,12 +98,32 @@ export const api = {
 
   /** Companion-файлы модели (внешние текстуры + анимационные FBX). */
   getModelBundle: (id: number) => http<ModelBundle>(`/api/assets/${id}/bundle`),
+
+  /** Открыть файл ассета в приложении ОС по умолчанию (запускается на машине-хосте). */
+  openAsset: (id: number) => http<void>(`/api/assets/${id}/open`, { method: 'POST' }),
+
+  /** Показать файл ассета в системном проводнике (открыть папку, выделить файл). */
+  revealAsset: (id: number) => http<void>(`/api/assets/${id}/reveal`, { method: 'POST' }),
+
+  /** Заливает построенную клиентом волну в кэш сервера. */
+  putWaveform: (asset: Asset, data: AudioWaveform) =>
+    http<void>(`/api/assets/${asset.id}/waveform`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
 }
 
 export const thumbUrl = (asset: Asset, size: 128 | 256 | 512 | 1024) =>
   `/api/assets/${asset.id}/thumb?size=${size}&v=${asset.mtime}`
 
 export const contentUrl = (asset: Asset) => `/api/assets/${asset.id}/content`
+
+/** Сколько столбиков в волне строит клиент (фиксировано; старые кэши с другой длиной рисуются как есть). */
+export const WAVEFORM_BARS = 200
+
+/** URL кэшированной волны; v={mtime} делает содержимое неизменным под этим адресом. */
+export const waveformUrl = (asset: Asset) => `/api/assets/${asset.id}/waveform?v=${asset.mtime}`
 
 /**
  * Сырой файл по относительному пути внутри источника. Сегменты кодируются, но '/'

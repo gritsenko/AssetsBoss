@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@fontsource-variable/instrument-sans": "^5.2.8",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@phosphor-icons/react": "^2.1.10",

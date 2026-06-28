@@ -23,6 +23,8 @@ export interface Asset {
   mtime: number
   width: number | null
   height: number | null
+  /** Длительность аудио в мс из кэша волны; null — не аудио либо волна ещё не построена. */
+  durationMs: number | null
   /** Кластер клипов («персонаж») в пределах папки; null — не кадр анимации. */
   animGroup: string | null
   /** Имя клипа (базовое имя файла без номера кадра). */
@@ -44,6 +46,12 @@ export interface AssetPage {
   total: number
   offset: number
   limit: number
+}
+
+/** Кэшированная волна аудио: длительность (мс) и пики 0..255 (по столбику на элемент). */
+export interface AudioWaveform {
+  durationMs: number
+  peaks: number[]
 }
 
 export interface AnimClip {

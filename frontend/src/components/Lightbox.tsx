@@ -19,6 +19,7 @@ import { displayKind, isBrowserRenderableImage } from '../lib/kind'
 import { canViewModel } from '../lib/three/modelFormats'
 import { useModelGroup } from '../hooks/useModelGroup'
 import { AnimPlayerControls } from './AnimPlayer'
+import { AudioPlayer } from './AudioPlayer'
 import { ModelViewer } from './ModelViewerLazy'
 
 const MIN_SCALE = 1
@@ -566,7 +567,9 @@ function Media({ asset, dk, dark }: { asset: Asset; dk: string; dark: boolean })
   }
   if (dk === 'audio') {
     return (
-      <audio src={contentUrl(asset)} controls autoPlay preload="metadata" style={{ width: 'min(560px, 90%)' }} />
+      <div style={{ position: 'relative', width: 'min(680px, 92%)', height: 220 }}>
+        <AudioPlayer asset={asset} dark={dark} autoPlay />
+      </div>
     )
   }
   if (dk === 'model') {

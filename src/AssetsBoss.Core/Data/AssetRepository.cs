@@ -29,13 +29,18 @@ public sealed record ModelCompanions(
     IReadOnlyList<ModelCompanion> Animations,
     IReadOnlyList<string> MaterialFiles);
 
+/// <summary>Кэш аудио-волны: mtime файла на момент построения, длительность и пики (байт на столбик).</summary>
+public sealed record AudioWaveform(long Mtime, long DurationMs, byte[] Peaks);
+
 public sealed class AssetRepository(Db db)
 {
     private const string AssetColumns =
         """
         a.id, a.source_id AS sourceId, a.rel_path AS relPath, a.parent_dir AS parentDir,
         a.name, a.ext, a.kind, a.size, a.mtime, a.width, a.height,
-        a.anim_group AS animGroup, a.anim_clip AS animClip
+        a.anim_group AS animGroup, a.anim_clip AS animClip,
+        (SELECT w.duration_ms FROM audio_waveforms w
+         WHERE w.asset_id = a.id AND w.mtime = a.mtime) AS durationMs
         """;
 
     /// <summary>
@@ -105,6 +110,31 @@ public sealed class AssetRepository(Db db)
         using var conn = db.Open();
         return conn.QuerySingleOrDefault<Asset>(
             $"SELECT {AssetColumns}, a.anim_frame AS animFrame FROM assets a WHERE a.id = @id", new { id });
+    }
+
+    /// <summary>Кэшированная волна аудио (любого mtime). Свежесть проверяет вызывающий по asset.Mtime.</summary>
+    public AudioWaveform? GetWaveform(long assetId)
+    {
+        using var conn = db.Open();
+        return conn.QuerySingleOrDefault<AudioWaveform>(
+            "SELECT mtime AS Mtime, duration_ms AS DurationMs, peaks AS Peaks FROM audio_waveforms WHERE asset_id = @assetId",
+            new { assetId });
+    }
+
+    /// <summary>Сохраняет (или перезаписывает) волну аудио. mtime — снимок assets.mtime на момент декода.</summary>
+    public void SaveWaveform(long assetId, long mtime, long durationMs, byte[] peaks)
+    {
+        using var conn = db.Open();
+        conn.Execute(
+            """
+            INSERT INTO audio_waveforms (asset_id, mtime, duration_ms, peaks)
+            VALUES (@assetId, @mtime, @durationMs, @peaks)
+            ON CONFLICT(asset_id) DO UPDATE SET
+              mtime = excluded.mtime,
+              duration_ms = excluded.duration_ms,
+              peaks = excluded.peaks
+            """,
+            new { assetId, mtime, durationMs, peaks });
     }
 
     public AssetPage Query(AssetQuery q)

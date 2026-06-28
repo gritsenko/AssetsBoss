@@ -4,6 +4,7 @@ using AssetsBoss.Core.Providers;
 using AssetsBoss.Core.Thumbnails;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Net.Http.Headers;
+using Serilog;
 
 namespace AssetsBoss.Server.Api;
 
@@ -111,6 +112,16 @@ public static class AssetsApi
             return Results.Stream(stream, contentType, enableRangeProcessing: true);
         });
 
+        // Открыть файл ассета в приложении ОС по умолчанию (как двойной клик в проводнике).
+        group.MapPost("/assets/{id:long}/open", (
+            long id, AssetRepository assets, SourceRepository sources, ProviderRegistry providers) =>
+            ShellAction(id, assets, sources, providers, ShellLauncher.OpenInDefaultApp));
+
+        // Показать файл ассета в системном проводнике (открыть его папку и выделить файл).
+        group.MapPost("/assets/{id:long}/reveal", (
+            long id, AssetRepository assets, SourceRepository sources, ProviderRegistry providers) =>
+            ShellAction(id, assets, sources, providers, ShellLauncher.RevealInExplorer));
+
         group.MapGet("/assets/{id:long}/thumb", async (
             long id, int size, string? rev, HttpContext http,
             AssetRepository assets, SourceRepository sources,
@@ -165,6 +176,89 @@ public static class AssetsApi
                 : Results.Ok(new { etag = result.ETag });
         });
 
+        // Волна аудио: сервер не декодирует звук (нет нативных x64-only либ на ARM, ср. 3D-превью) —
+        // пики и длительность считает клиент через Web Audio API и кэширует здесь.
+        group.MapGet("/assets/{id:long}/waveform", (long id, HttpContext http, AssetRepository assets) =>
+        {
+            var asset = assets.GetById(id);
+            if (asset is null || asset.Kind != AssetKind.Audio) return Results.NotFound();
+
+            var wf = assets.GetWaveform(id);
+            if (wf is null || wf.Mtime != asset.Mtime) return Results.NotFound();
+
+            // URL содержит v={mtime} → содержимое неизменно; пики (байты 0..255) отдаём как int[]
+            http.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+            return Results.Ok(new { durationMs = wf.DurationMs, peaks = Array.ConvertAll(wf.Peaks, b => (int)b) });
+        });
+
+        // Клиент декодирует аудио и присылает { durationMs, peaks }; сервер кэширует под mtime файла.
+        group.MapPost("/assets/{id:long}/waveform", async (
+            long id, HttpContext http, AssetRepository assets, CancellationToken ct) =>
+        {
+            // волна — это сотни байт; режем заведомо огромные тела ещё до парсинга
+            if (http.Request.ContentLength is > 256 * 1024)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+            var asset = assets.GetById(id);
+            if (asset is null) return Results.NotFound();
+            if (asset.Kind != AssetKind.Audio)
+                return Results.BadRequest(new { error = "waveform upload allowed only for audio" });
+
+            WaveformUpload? upload;
+            try { upload = await http.Request.ReadFromJsonAsync<WaveformUpload>(ct); }
+            catch { upload = null; }
+            if (upload?.Peaks is not { Length: >= 1 and <= 2048 })
+                return Results.BadRequest(new { error = "peaks must be an array of 1..2048 values" });
+            if (upload.DurationMs < 0)
+                return Results.BadRequest(new { error = "durationMs must be non-negative" });
+
+            var peaks = new byte[upload.Peaks.Length];
+            for (var i = 0; i < peaks.Length; i++)
+                peaks[i] = (byte)Math.Clamp(upload.Peaks[i], 0, 255);
+
+            assets.SaveWaveform(id, asset.Mtime, upload.DurationMs, peaks);
+            return Results.NoContent();
+        });
+
         return group;
     }
+
+    /// <summary>
+    /// Резолвит локальный путь файла ассета и выполняет над ним действие оболочки ОС
+    /// (открыть/показать). Действие требует физического файла на этой машине — удалённые
+    /// провайдеры без <see cref="ProviderCaps.LocalPath"/> не поддержаны.
+    /// </summary>
+    private static IResult ShellAction(
+        long id, AssetRepository assets, SourceRepository sources,
+        ProviderRegistry providers, Action<string> action)
+    {
+        var asset = assets.GetById(id);
+        if (asset is null) return Results.NotFound();
+        var src = sources.GetById(asset.SourceId);
+        if (src is null) return Results.NotFound();
+
+        var provider = providers.TryGet(src.Scheme);
+        if (provider is null) return Results.StatusCode(503);
+
+        var path = provider.GetLocalPath(src, asset.RelPath);
+        if (path is null)
+            return Results.UnprocessableEntity(new { error = "Файл недоступен локально" });
+
+        try
+        {
+            action(path);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Не удалось выполнить действие ОС над {Path}", path);
+            return Results.Json(
+                new { error = "Не удалось открыть файл средствами системы" },
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        return Results.NoContent();
+    }
+
+    /// <summary>Тело POST /waveform: длительность (мс) и пики 0..255 (по столбику на элемент).</summary>
+    private sealed record WaveformUpload(long DurationMs, int[] Peaks);
 }

@@ -1,8 +1,10 @@
-import { Check } from '@phosphor-icons/react'
+import { Check, Play, Stop } from '@phosphor-icons/react'
 import type { Asset } from '../api/types'
 import { ACCENT } from '../theme'
 import { useHover } from '../hooks/useHover'
-import { displayName, extLabel, formatSize } from '../lib/format'
+import { useAudio } from '../lib/audio/player'
+import { useWaveform } from '../lib/audio/waveform'
+import { displayName, extLabel, formatSize, formatTime } from '../lib/format'
 import { rendersAsIcon } from '../lib/kind'
 import { AssetThumb } from './AssetThumb'
 
@@ -88,6 +90,7 @@ export function AssetCard({ asset, selected, thumbSize, showExt, frameNo, compac
             {extLabel(asset.ext)}
           </div>
         )}
+        {asset.kind === 'audio' && !compact && <AudioOverlay asset={asset} />}
         {frameNo !== undefined && !selected && !compact && (
           <div
             className="font-mono"
@@ -155,5 +158,77 @@ export function AssetCard({ asset, selected, thumbSize, showExt, frameNo, compac
       </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Оверлей аудио-карточки: всегда видимая кнопка play/stop (внизу-слева) и бейдж длительности
+ * (вверху-справа). Длительность — из DTO, а пока кэша нет — из построенной клиентом волны.
+ * Вынесен в отдельный компонент, чтобы на транспорт-стор плеера подписывались только аудио-карточки.
+ */
+function AudioOverlay({ asset }: { asset: Asset }) {
+  const { playing, toggle } = useAudio(asset)
+  const { data } = useWaveform(asset)
+  const ms = asset.durationMs ?? data?.durationMs ?? null
+
+  return (
+    <>
+      {ms != null && (
+        <div
+          className="font-mono"
+          style={{
+            position: 'absolute',
+            right: 8,
+            top: 8,
+            fontSize: 9.5,
+            fontWeight: 500,
+            color: '#FFF7EA',
+            background: 'rgba(20,19,16,0.62)',
+            padding: '3px 7px',
+            borderRadius: 5,
+            letterSpacing: '0.04em',
+          }}
+        >
+          {formatTime(ms / 1000)}
+        </div>
+      )}
+      {/* Кружок видимый 28px, но hit-зона расширена прозрачным padding'ом (~+30% по стороне):
+          по мелкой миниатюре в кнопку проще попасть, а вид карточки не меняется. */}
+      <button
+        type="button"
+        title={playing ? 'Stop' : 'Play'}
+        onClick={(e) => {
+          e.stopPropagation()
+          toggle()
+        }}
+        onDoubleClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          left: 4,
+          bottom: 4,
+          padding: 4,
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          display: 'flex',
+        }}
+      >
+        <span
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#FFF9EF',
+            background: playing ? ACCENT : 'rgba(20,19,16,0.62)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+          }}
+        >
+          {playing ? <Stop size={14} weight="fill" /> : <Play size={14} weight="fill" />}
+        </span>
+      </button>
+    </>
   )
 }

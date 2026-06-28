@@ -299,18 +299,17 @@ export default function App() {
     [clearSelection],
   )
 
-  /** Перейти в папку ассета (показать его «соседей»), сохранив его выделенным. */
-  const goToFolder = useCallback((asset: Asset) => {
-    setActiveSourceId(asset.sourceId)
-    setDir(asset.parentDir)
-    setKind(null)
-    setQuery('')
-    setLightbox(null)
-    const key = `a:${asset.id}`
-    setSelected(new Set([key]))
-    setAnchorKey(key)
-    setPrimaryKey(key)
-  }, [])
+  /** Показать файл ассета в системном проводнике (открыть его папку, выделить файл). */
+  const goToFolder = useCallback(
+    async (asset: Asset) => {
+      try {
+        await api.revealAsset(asset.id)
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : 'Не удалось открыть папку')
+      }
+    },
+    [showToast],
+  )
 
   const selectSource = useCallback(
     (id: number | undefined) => {

@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { modelThumbUrl, thumbUrl } from '../api/client'
 import type { Asset } from '../api/types'
+import { useAudio, useAudioProgress } from '../lib/audio/player'
+import { useWaveform } from '../lib/audio/waveform'
 import { canViewModel } from '../lib/three/modelFormats'
 import { displayKind, isThumbable, KIND_META } from '../lib/kind'
+import { ACCENT } from '../theme'
+import { WaveBars } from './WaveBars'
 
 interface Props {
   asset: Asset
@@ -25,11 +29,56 @@ export function AssetThumb({ asset, size, iconSize = 30 }: Props) {
     return <ModelThumb key={`${asset.id}:${asset.mtime}:${size}`} asset={asset} size={size} iconSize={iconSize} />
   }
 
+  if (asset.kind === 'audio') {
+    return <AudioThumb key={`${asset.id}:${asset.mtime}`} asset={asset} iconSize={iconSize} />
+  }
+
   if (isThumbable(asset)) {
     return <ImageThumb asset={asset} size={size} iconSize={iconSize} />
   }
 
   return <IconFill Icon={Icon} iconSize={iconSize} />
+}
+
+/**
+ * Миниатюра аудио — реальная волна из кэша (строится клиентом при первом показе, см.
+ * useWaveform). Пока волны нет / не удалось построить — иконка ноты. У играющего трека
+ * проигранная часть подсвечивается акцентом (см. AudioThumbProgress).
+ */
+function AudioThumb({ asset, iconSize }: { asset: Asset; iconSize: number }) {
+  const { data } = useWaveform(asset)
+  // дёшево (только transport): подписка на прогресс висит лишь на активной карточке
+  const { active } = useAudio(asset)
+  if (!data) return <IconFill Icon={KIND_META.audio.Icon} iconSize={iconSize} />
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', padding: '0 11%' }}>
+      <div style={{ position: 'relative', width: '100%', height: '52%' }}>
+        <WaveBars peaks={data.peaks} color="var(--line3)" />
+        {active && (
+          <AudioThumbProgress
+            peaks={data.peaks}
+            fallbackDur={(data.durationMs ?? asset.durationMs ?? 0) / 1000}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Подсветка проигранной части волны поверх серой дорожки. Вынесена отдельно и
+ * монтируется только у активного трека: лишь она подписана на прогресс (тикает по rAF),
+ * поэтому сетка не перерисовывается на каждый кадр — перерисовывается одна эта карточка.
+ */
+function AudioThumbProgress({ peaks, fallbackDur }: { peaks: number[]; fallbackDur: number }) {
+  const { currentTime, duration } = useAudioProgress()
+  const total = duration > 0 ? duration : fallbackDur
+  const fraction = total > 0 ? Math.min(1, currentTime / total) : 0
+  return (
+    <div style={{ position: 'absolute', inset: 0, clipPath: `inset(0 ${(1 - fraction) * 100}% 0 0)` }}>
+      <WaveBars peaks={peaks} color={ACCENT} />
+    </div>
+  )
 }
 
 function ImageThumb({ asset, size, iconSize }: Required<Props>) {
