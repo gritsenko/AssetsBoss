@@ -18,9 +18,7 @@
     <Company>AssetsBoss</Company>
     <Description>Лёгкий браузер локальных игровых ассетов</Description>
     <Copyright>Copyright © 2026</Copyright>
-    <Version>0.1.0</Version>
-    <FileVersion>0.1.0.0</FileVersion>
-    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <!-- Version/FileVersion/AssemblyVersion заданы централизованно в Directory.Build.props -->
   </PropertyGroup>
 
   <!-- True single-file: применяется только при publish с указанным RID

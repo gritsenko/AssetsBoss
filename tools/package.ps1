@@ -20,9 +20,11 @@ $frontend = Join-Path $root 'frontend'
 $distDir = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
-[xml]$xml = Get-Content $proj
+# Версия задана централизованно в Directory.Build.props (см. <Version>).
+$propsFile = Join-Path $root 'Directory.Build.props'
+[xml]$xml = Get-Content $propsFile
 $version = @($xml.Project.PropertyGroup.Version | Where-Object { $_ })[0]
-if (-not $version) { throw "Version не найдена в $proj" }
+if (-not $version) { throw "Version не найдена в $propsFile" }
 
 # Детерминированная арка node. Менеджеры версий (fnm в профиле пользователя) могут
 # подставить node другой архитектуры, чем установленные нативные биндинги сборщика
