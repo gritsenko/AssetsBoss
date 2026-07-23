@@ -10,7 +10,7 @@
        выводятся автоматически. Этот же <Version> читают tools/package.ps1 и
        .github/workflows/release.yml (парсят XML напрямую) — при переносе не забудь про них. -->
   <PropertyGroup>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <FileVersion>$(Version).0</FileVersion>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
   </PropertyGroup>
